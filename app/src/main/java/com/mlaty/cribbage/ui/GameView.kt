@@ -8,6 +8,8 @@ import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import com.mlaty.cribbage.game.Breakdown
+import com.mlaty.cribbage.game.Combo
+import com.mlaty.cribbage.game.ComboKind
 import com.mlaty.cribbage.game.Game
 import com.mlaty.cribbage.game.Phase
 import com.mlaty.cribbage.game.Scoring
@@ -211,7 +213,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.textSize = dp(10f)
         text.color = Theme.DIM
         c.drawText("счёт вслух", w / 2f, top + dp(50f), text)
-        drawPegBadge(c, g, w - pad, top + dp(6f))
+        // Счёт за ход показываем на той же стороне, с ходившей стороны стола.
+        val aiSide = g.pegSeat == Seat.AI
+        drawPegBadge(c, g, if (aiSide) w - pad else pad, top + dp(6f), aiSide)
 
         val seqTop = top + boxH + dp(12f)
         if (g.sequence.isNotEmpty()) {
@@ -261,109 +265,134 @@ class GameView(context: Context, private val host: Host) : View(context) {
         drawOpponent(c, g, w, pad, 0)
 
         val step = g.showStep()
-        val top = dp(TOP_BAR) + dp(74f) + dp(10f)
+        val starter = g.starter!!
+        val top = dp(TOP_BAR) + dp(60f)
 
         text.typeface = Typeface.DEFAULT_BOLD
         text.textSize = dp(15f)
         text.color = Theme.DIM
         c.drawText(step.title, w / 2f, top + dp(12f), text)
 
-        val xs = fitRow(step.cards.size, w - pad * 2, dp(56f), dp(6f), w / 2f, top + dp(24f))
+        // Рука показана компактно: главное место на экране отдано комбинациям.
+        val xs = fitRow(step.cards.size, w - pad * 2, dp(44f), dp(5f), w / 2f, top + dp(22f))
         step.cards.forEachIndexed { i, card ->
             drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true)
         }
+        val starterY = top + dp(22f) + dp(44f) * 1.4f + dp(6f)
+        val stSize = dp(20f)
+        drawCard(c, w / 2f - stSize, stSize, starterY, starter, true, false, true)
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(10f)
+        text.color = Theme.DIM
+        c.drawText("стартовая", w / 2f, starterY + stSize * 1.4f + dp(10f), text)
 
-        g.starter?.let { st ->
-            val size = dp(24f)
-            val y = top + dp(24f) + dp(56f) * 1.4f + dp(8f)
-            drawCard(c, w / 2f - size, size, y, st, true, false, true)
-            text.typeface = Typeface.DEFAULT
-            text.textSize = dp(10f)
-            text.color = Theme.DIM
-            c.drawText("стартовая", w / 2f, y + size * 1.4f + dp(11f), text)
-        }
-
-        val panelTop = top + dp(24f) + dp(150f)
-        drawBreakdown(c, step.breakdown, pad, panelTop, w - pad * 2, g.lastShowBonus)
+        val combos = Scoring.combos(step.cards, starter, step.isCrib)
+        val afterCombos = drawCombos(c, combos, pad, starterY + stSize * 1.4f + dp(18f), w - pad * 2)
+        drawTotal(c, pad, afterCombos + dp(6f), w - pad * 2, step.breakdown, g.lastShowBonus)
 
         button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f), "Дальше", true, A_NEXT, -1)
     }
 
-    private class Cat(val name: String, val points: Int, val color: Int)
+    /**
+     * Засчитанные комбинации — картами, а не названиями категорий.
+     * Каждая пятнашка, каждая пара и каждая серия показаны отдельной группой
+     * мини-карт, рядом — очки за неё. Возвращает y под последним рядом.
+     */
+    private fun drawCombos(
+        c: Canvas, combos: List<Combo>, x0: Float, y0: Float, width: Float
+    ): Float {
+        val cw = dp(19f)
+        val gap = dp(1.5f)
+        val rowH = dp(31f)
+        val maxY = y0 + dp(217f)
+        var x = x0
+        var y = y0
+        var shown = 0
+        for (cb in combos) {
+            val chipW = cb.cards.size * cw + (cb.cards.size - 1) * gap + dp(8f) + dp(24f)
+            if (x > x0 && x + chipW > x0 + width) { x = x0; y += rowH }
+            if (y > maxY) break
+            drawCombo(c, x, y, cw, gap, cb)
+            x += chipW + dp(5f)
+            shown++
+        }
+        if (shown == 0) {
+            text.typeface = Typeface.DEFAULT
+            text.textSize = dp(12f)
+            text.color = Theme.DIM
+            c.drawText("ничего не засчитано", x0 + width / 2f, y0 + dp(16f), text)
+            return y0 + rowH
+        }
+        if (shown < combos.size) {
+            text.typeface = Typeface.DEFAULT
+            text.textSize = dp(11f)
+            text.color = Theme.DIM
+            c.drawText("и ещё ${combos.size - shown}", x0 + width / 2f, y + rowH - dp(6f), text)
+        }
+        return y + rowH
+    }
+
+    private fun drawCombo(c: Canvas, x: Float, y: Float, cw: Float, gap: Float, cb: Combo) {
+        val ch = dp(26f)
+        var cx = x
+        for (card in cb.cards) {
+            fill.color = Theme.FACE
+            rect.set(cx, y, cx + cw, y + ch)
+            c.drawRoundRect(rect, dp(2.5f), dp(2.5f), fill)
+            val ink = if (Card.isRed(card)) Theme.RED else Theme.INK
+            text.textAlign = Paint.Align.CENTER
+            text.typeface = Typeface.DEFAULT_BOLD
+            text.textSize = cw * 0.50f
+            text.color = ink
+            c.drawText(Card.rankLabel(card.rank), cx + cw / 2f, y + ch * 0.50f, text)
+            text.textSize = cw * 0.38f
+            c.drawText(Card.suitSymbol(card.suit), cx + cw / 2f, y + ch * 0.86f, text)
+            cx += cw + gap
+        }
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(13f)
+        text.color = comboColor(cb.kind)
+        c.drawText("+${cb.points}", cx + dp(10f), y + ch * 0.70f, text)
+    }
+
+    private fun comboColor(kind: ComboKind): Int = when (kind) {
+        ComboKind.FIFTEEN -> Theme.CAT_FIFTEEN
+        ComboKind.PAIR -> Theme.CAT_PAIR
+        ComboKind.RUN -> Theme.CAT_RUN
+        ComboKind.FLUSH -> Theme.CAT_FLUSH
+        ComboKind.NOBS -> Theme.CAT_NOBS
+    }
 
     /**
-     * Панель подсчёта: крупный итог, затем строки по категориям с полосами —
-     * сразу видно, из чего сложились очки, а не только сумма.
+     * Итог подсчёта. Флеш и нобс — единственные очки без набора карт,
+     * поэтому они идут отдельной строкой: набором их показать нельзя.
      */
-    private fun drawBreakdown(
-        c: Canvas, b: Breakdown, x0: Float, y0: Float, width: Float, bonus: String
+    private fun drawTotal(
+        c: Canvas, x0: Float, y0: Float, width: Float, b: Breakdown, bonus: String
     ) {
-        val rows = ArrayList<Cat>()
-        if (b.fifteens > 0) rows.add(Cat("Пятнашки", b.fifteens, Theme.CAT_FIFTEEN))
-        if (b.pairs > 0) rows.add(Cat("Пары", b.pairs, Theme.CAT_PAIR))
-        if (b.runs > 0) rows.add(Cat("Серии", b.runs, Theme.CAT_RUN))
-        if (b.flush > 0) rows.add(Cat("Флеш", b.flush, Theme.CAT_FLUSH))
-        if (b.nobs > 0) rows.add(Cat("Нобс", b.nobs, Theme.CAT_NOBS))
-
-        val rowH = dp(22f)
-        val topH = dp(40f)
-        val tailH = dp(16f) + if (bonus.isEmpty()) 0f else dp(15f)
-        val bodyH = if (rows.isEmpty()) rowH else rows.size * rowH
-        val panelH = topH + bodyH + tailH
-
+        val panelH = dp(if (bonus.isEmpty()) 50f else 64f)
         fill.color = Theme.PANEL
         rect.set(x0, y0, x0 + width, y0 + panelH)
         c.drawRoundRect(rect, dp(12f), dp(12f), fill)
 
-        text.textAlign = Paint.Align.CENTER
+        text.textAlign = Paint.Align.LEFT
         text.typeface = Typeface.DEFAULT_BOLD
-        text.textSize = dp(34f)
-        text.color = Theme.GOLD
-        c.drawText(b.total.toString(), x0 + width / 2f, y0 + dp(30f), text)
-
-        val labelX = x0 + dp(14f)
-        val barX = x0 + dp(96f)
-        val barMax = width - dp(96f) - dp(46f)
-
-        if (rows.isEmpty()) {
-            text.typeface = Typeface.DEFAULT
-            text.textSize = dp(12f)
-            text.color = Theme.DIM
-            c.drawText("ничего не засчитано", x0 + width / 2f, y0 + topH + dp(16f), text)
-        } else {
-            val maxP = rows.maxOf { it.points }
-            var y = y0 + topH + dp(14f)
-            for (r in rows) {
-                text.textAlign = Paint.Align.LEFT
-                text.typeface = Typeface.DEFAULT
-                text.textSize = dp(12f)
-                text.color = Theme.TEXT
-                c.drawText(r.name, labelX, y, text)
-
-                fill.color = Theme.LINE
-                rect.set(barX, y - dp(7f), barX + barMax, y - dp(3f))
-                c.drawRoundRect(rect, dp(2f), dp(2f), fill)
-                fill.color = r.color
-                val bw = if (maxP > 0) barMax * r.points / maxP else 0f
-                rect.set(barX, y - dp(7f), barX + bw, y - dp(3f))
-                c.drawRoundRect(rect, dp(2f), dp(2f), fill)
-
-                text.textAlign = Paint.Align.CENTER
-                text.typeface = Typeface.DEFAULT_BOLD
-                text.textSize = dp(13f)
-                text.color = r.color
-                c.drawText(r.points.toString(), x0 + width - dp(20f), y, text)
-                y += rowH
-            }
-        }
-
+        text.textSize = dp(14f)
+        text.color = Theme.TEXT
+        c.drawText("Всего", x0 + dp(16f), y0 + dp(32f), text)
         if (bonus.isNotEmpty()) {
-            text.textAlign = Paint.Align.CENTER
             text.typeface = Typeface.DEFAULT
-            text.textSize = dp(11f)
+            text.textSize = dp(10f)
             text.color = Theme.GREEN
-            c.drawText(bonus, x0 + width / 2f, y0 + panelH - dp(7f), text)
+            c.drawText(bonus, x0 + dp(16f), y0 + dp(48f), text)
         }
+
+        text.textAlign = Paint.Align.RIGHT
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(32f)
+        text.color = Theme.GOLD
+        c.drawText(b.total.toString(), x0 + width - dp(16f), y0 + dp(38f), text)
+        text.textAlign = Paint.Align.CENTER
     }
 
     // ---------------------------------------------------------------- конец партии
@@ -402,7 +431,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
      * Золотая отметка «+N» рядом со счётом: показывает, сколько только что
      * начислено за сыгранную карту, и плавно гаснет.
      */
-    private fun drawPegBadge(c: Canvas, g: Game, right: Float, y: Float) {
+    private fun drawPegBadge(c: Canvas, g: Game, near: Float, y: Float, anchorRight: Boolean) {
         if (g.pegSeq != lastSeq) {
             lastSeq = g.pegSeq
             pegAt = System.currentTimeMillis()
@@ -417,7 +446,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.color = Theme.INK
         val bw = text.measureText(label) + dp(20f)
         val bh = dp(27f)
-        val x = right - bw
+        val x = if (anchorRight) near - bw else near
         text.alpha = alpha
         fill.alpha = alpha
         fill.color = Theme.GOLD

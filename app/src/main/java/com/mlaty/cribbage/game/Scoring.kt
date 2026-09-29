@@ -23,6 +23,11 @@ data class Breakdown(
     }
 }
 
+enum class ComboKind { FIFTEEN, PAIR, RUN, FLUSH, NOBS }
+
+/** Одна засчитанная комбинация: конкретные карты и очки за них. */
+data class Combo(val cards: List<Card>, val points: Int, val kind: ComboKind)
+
 object Scoring {
 
     fun value(rank: Int): Int = if (rank == 1) 1 else minOf(rank, 10)
@@ -40,6 +45,87 @@ object Scoring {
             if (bits >= 2 && sum == 15) combos++
         }
         return combos * 2
+    }
+
+    /**
+     * Все засчитанные комбинации по отдельности, чтобы показать их картами,
+     * а не названиями категорий. Пятнашки и пары перечислены каждая своим набором
+     * карт, серия — столько раз, сколько способов выбрать по карте каждого ранга.
+     * Флеш и нобс тоже раскладываются на карты: флеш — это четыре (пять) карты
+     * одной масти, нобс — одна карта. Сумма combo совпадает с breakdown(...).total.
+     */
+    fun combos(handCards: List<Card>, starter: Card, isCrib: Boolean = false): List<Combo> {
+        val all = handCards + starter
+        val out = ArrayList<Combo>()
+        for (mask in 0 until (1 shl all.size)) {
+            var bits = 0
+            var sum = 0
+            val set = ArrayList<Card>()
+            for (i in all.indices) {
+                if (mask and (1 shl i) != 0) {
+                    bits++
+                    sum += value(all[i].rank)
+                    set.add(all[i])
+                }
+            }
+            if (bits >= 2 && sum == 15) out.add(Combo(set, 2, ComboKind.FIFTEEN))
+        }
+        for (i in all.indices) for (j in i + 1 until all.size) {
+            if (all[i].rank == all[j].rank) out.add(Combo(listOf(all[i], all[j]), 2, ComboKind.PAIR))
+        }
+        out.addAll(runsOf(all))
+
+        val suits = HashSet<Int>(4)
+        for (c in handCards) suits.add(c.suit)
+        if (suits.size == 1) {
+            val five = starter.suit in suits
+            when {
+                five -> out.add(Combo(handCards + starter, 5, ComboKind.FLUSH))
+                // Четырёхкарточный флеш в к crib не засчитывается — только пять карт одной масти.
+                !isCrib -> out.add(Combo(handCards, 4, ComboKind.FLUSH))
+            }
+        }
+        if (!isCrib) {
+            for (c in handCards) {
+                if (c.rank == 11 && c.suit == starter.suit) {
+                    out.add(Combo(listOf(c), 1, ComboKind.NOBS))
+                    break
+                }
+            }
+        }
+        return out
+    }
+
+    private fun runsOf(cards: List<Card>): List<Combo> {
+        val byRank = LinkedHashMap<Int, MutableList<Card>>()
+        for (c in cards) byRank.getOrPut(c.rank) { ArrayList() }.add(c)
+        val ranks = byRank.keys.sorted()
+        val out = ArrayList<Combo>()
+        var i = 0
+        while (i < ranks.size) {
+            var j = i
+            while (j + 1 < ranks.size && ranks[j + 1] == ranks[j] + 1) j++
+            val len = j - i + 1
+            if (len >= 3) {
+                val picks = (i..j).map { byRank[ranks[it]]!! }
+                val idx = IntArray(picks.size)
+                while (true) {
+                    val set = ArrayList<Card>(picks.size)
+                    for (k in picks.indices) set.add(picks[k][idx[k]])
+                    out.add(Combo(set, len, ComboKind.RUN))
+                    var k = picks.size - 1
+                    while (k >= 0) {
+                        idx[k]++
+                        if (idx[k] < picks[k].size) break
+                        idx[k] = 0
+                        k--
+                    }
+                    if (k < 0) break
+                }
+            }
+            i = j + 1
+        }
+        return out
     }
 
     /** Каждая пара равных карт — 2 очка, поэтому тройка это 3 пары (6), а четвёрка 6 пар (12). */

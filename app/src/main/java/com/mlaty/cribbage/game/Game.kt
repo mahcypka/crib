@@ -13,7 +13,8 @@ data class ShowStep(
     val title: String,
     val cards: List<Card>,
     val breakdown: Breakdown,
-    val seat: Seat
+    val seat: Seat,
+    val isCrib: Boolean = false
 )
 
 /**
@@ -288,7 +289,7 @@ class Game(val rules: Rules, val seed: Long) {
         return when (showIndex) {
             0 -> ShowStep(name(first) + ": рука", cardsOf(first), Scoring.hand(cardsOf(first), st), first)
             1 -> ShowStep(name(second) + ": рука", cardsOf(second), Scoring.hand(cardsOf(second), st), second)
-            else -> ShowStep(name(dealer) + ": к crib", crib, Scoring.crib(crib, st), dealer)
+            else -> ShowStep(name(dealer) + ": к crib", crib, Scoring.crib(crib, st), dealer, true)
         }
     }
 
