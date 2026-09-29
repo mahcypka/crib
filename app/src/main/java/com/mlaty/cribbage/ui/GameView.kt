@@ -133,7 +133,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private fun drawDiscard(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
         drawOpponent(c, g, w, pad, g.aiSix.size)
 
-        val handTop = handTop(h)
+        val handY = handTop(h)
         val mid = dp(TOP_BAR) + dp(88f) + dp(8f)
 
         text.typeface = Typeface.DEFAULT_BOLD
@@ -160,9 +160,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(12f)
         text.color = Theme.DIM
-        canvas.drawText("Ваши карты", w / 2f, handTop - dp(8f), text)
+        canvas.drawText("Ваши карты", w / 2f, handY - dp(8f), text)
 
-        val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handTop)
+        val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerSix.forEachIndexed { i, card ->
             val sel = selected.contains(i)
             drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, sel, true)
@@ -185,9 +185,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private fun drawPlay(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
         drawOpponent(c, g, w, pad, g.aiLeft.size)
 
-        val handTop = handTop(h)
+        val handY = handTop(h)
         val top = dp(TOP_BAR) + dp(88f) + dp(10f)
-        val tableBottom = handTop - dp(48f)
+        val tableBottom = handY - dp(48f)
 
         val boxH = min(dp(56f), max(dp(46f), (tableBottom - top) * 0.42f))
         fill.color = Theme.PANEL
@@ -224,7 +224,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             canvas.drawText("стартовая карта", w / 2f, y + size * 1.4f + dp(12f), text)
         }
 
-        val annTop = handTop - dp(40f)
+        val annTop = handY - dp(40f)
         fill.color = Theme.PANEL
         rect.set(pad, annTop, w - pad, annTop + dp(32f))
         canvas.drawRoundRect(rect, dp(8f), dp(8f), fill)
@@ -233,7 +233,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.color = Theme.TEXT
         canvas.drawText(g.announce, w / 2f, annTop + dp(21f), text)
 
-        val xs = fitRow(g.playerLeft.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handTop)
+        val xs = fitRow(g.playerLeft.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerLeft.forEachIndexed { i, card ->
             val can = g.turn == Seat.PLAYER && g.count + Scoring.value(card.rank) <= 31
             drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, can, true)
