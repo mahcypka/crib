@@ -1,18 +1,21 @@
 package com.mlaty.cribbage.ui
 
-/** Палитра приложения. Фон везде чёрный, как и просили. */
+/** Палитра приложения. Фон — зелёное сукно карточного стола. */
 object Theme {
-    const val BG = 0xFF000000.toInt()
-    const val PANEL = 0xFF141414.toInt()
-    const val LINE = 0xFF2C2C2C.toInt()
-    const val TEXT = 0xFFECECEC.toInt()
-    const val DIM = 0xFF8A8A8A.toInt()
-    const val GREEN = 0xFF4CAF50.toInt()
-    const val GREEN_D = 0xFF255E29.toInt()
-    const val GOLD = 0xFFE0B341.toInt()
-    const val RED = 0xFFD8503F.toInt()
-    const val FACE = 0xFFF4F3EF.toInt()
-    const val BACK = 0xFF24486E.toInt()
-    const val BACK_D = 0xFF16304E.toInt()
+    /** Сукно стола. */
+    const val BG = 0xFF14532D.toInt()
+    /** Панели поверх сукна: то же зелёное, но темнее. */
+    const val PANEL = 0xFF0B3A1C.toInt()
+    const val LINE = 0xFF2C6B4A.toInt()
+    const val TEXT = 0xFFF2F2EF.toInt()
+    const val DIM = 0xFFA6CDB6.toInt()
+    /** Акцент игрока: светлый, иначе сливается с сукном. */
+    const val GREEN = 0xFF7FD89A.toInt()
+    const val GREEN_D = 0xFF2E7D4F.toInt()
+    const val GOLD = 0xFFF0C860.toInt()
+    const val RED = 0xFFE8645A.toInt()
+    const val FACE = 0xFFF7F6F1.toInt()
+    const val BACK = 0xFF2B4C7E.toInt()
+    const val BACK_D = 0xFF1A3459.toInt()
     const val INK = 0xFF1A1A1A.toInt()
 }

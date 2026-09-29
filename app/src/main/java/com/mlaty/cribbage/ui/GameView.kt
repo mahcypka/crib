@@ -153,7 +153,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             val xs = fitRow(g.crib.size, w - pad * 2, dp(30f), dp(4f), w / 2f, cribTop + dp(18f))
             // к crib лежит рубашкой: чужие отбросы игроку показывать рано
             g.crib.indices.forEach { i ->
-                drawCard(c, xs[i], xs[i + 1], xs[i + 2], null, false, false, false)
+                drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], null, false, false, false)
             }
         }
 
@@ -165,8 +165,8 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerSix.forEachIndexed { i, card ->
             val sel = selected.contains(i)
-            drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, sel, true)
-            addCardHit(xs[i], xs[i + 1], xs[i + 2], A_SELECT, i)
+            drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, sel, true)
+            addCardHit(xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], A_SELECT, i)
         }
 
         val ok = selected.size == g.playerDiscardsLeft && g.playerDiscardsLeft > 0
@@ -206,7 +206,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         if (g.sequence.isNotEmpty()) {
             val xs = fitRow(g.sequence.size, w - pad * 2, dp(38f), dp(4f), w / 2f, seqTop)
             g.sequence.forEachIndexed { i, card ->
-                drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, false, true)
+                drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true)
             }
         } else {
             text.textSize = dp(12f)
@@ -214,17 +214,20 @@ class GameView(context: Context, private val host: Host) : View(context) {
             c.drawText("карты на столе", w / 2f, seqTop + dp(22f), text)
         }
 
+        val annTop = handY - dp(40f)
+
+        // Стартовая карта привязана к панели объявления снизу, а не к ряду сверху:
+        // на невысоких экранах иначе подпись налезала бы на панель.
         g.starter?.let { st ->
             val size = dp(28f)
-            val y = seqTop + dp(58f)
+            val y = annTop - dp(48f)
             drawCard(c, w / 2f - size, y, size, st, true, false, true)
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(10f)
             text.color = Theme.DIM
-            c.drawText("стартовая карта", w / 2f, y + size * 1.4f + dp(12f), text)
+            c.drawText("стартовая карта", w / 2f, y + size * 1.4f + dp(11f), text)
         }
 
-        val annTop = handY - dp(40f)
         fill.color = Theme.PANEL
         rect.set(pad, annTop, w - pad, annTop + dp(32f))
         c.drawRoundRect(rect, dp(8f), dp(8f), fill)
@@ -236,8 +239,8 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val xs = fitRow(g.playerLeft.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerLeft.forEachIndexed { i, card ->
             val can = g.turn == Seat.PLAYER && g.count + Scoring.value(card.rank) <= 31
-            drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, can, true)
-            if (can) addCardHit(xs[i], xs[i + 1], xs[i + 2], A_PLAY, i)
+            drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, can, true)
+            if (can) addCardHit(xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], A_PLAY, i)
         }
 
         when {
@@ -265,7 +268,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
         val xs = fitRow(step.cards.size, w - pad * 2, dp(56f), dp(6f), w / 2f, top + dp(24f))
         step.cards.forEachIndexed { i, card ->
-            drawCard(c, xs[i], xs[i + 1], xs[i + 2], card, true, false, true)
+            drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true)
         }
 
         g.starter?.let { st ->
@@ -324,7 +327,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c.drawText("Компьютер", w / 2f, dp(TOP_BAR) + dp(18f), text)
         val n = max(cardsLeft, 1)
         val xs = fitRow(n, w - pad * 2, dp(28f), dp(4f), w / 2f, dp(TOP_BAR) + dp(28f))
-        repeat(n) { i -> drawCard(c, xs[i], xs[i + 1], xs[i + 2], null, false, false, false) }
+        repeat(n) { i -> drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], null, false, false, false) }
     }
 
     private fun handTop(h: Float) = h - dp(116f) - dp(104f) - dp(10f)
