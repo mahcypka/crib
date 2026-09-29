@@ -70,8 +70,15 @@ object Scoring {
             }
             if (bits >= 2 && sum == 15) out.add(Combo(set, 2, ComboKind.FIFTEEN))
         }
-        for (i in all.indices) for (j in i + 1 until all.size) {
-            if (all[i].rank == all[j].rank) out.add(Combo(listOf(all[i], all[j]), 2, ComboKind.PAIR))
+        // Совпадающие по номиналу карты — одна группа сразу со своими очками:
+        // пара 2, тройка 6, четвёрка 12. Именно так это и объявляют за столом,
+        // хотя очки те же, что при попарном счёте.
+        val byRank = LinkedHashMap<Int, MutableList<Card>>()
+        for (c in all) byRank.getOrPut(c.rank) { ArrayList() }.add(c)
+        for (list in byRank.values) {
+            if (list.size >= 2) {
+                out.add(Combo(list, list.size * (list.size - 1), ComboKind.PAIR))
+            }
         }
         out.addAll(runsOf(all))
 
@@ -181,35 +188,23 @@ object Scoring {
     }
 
     /**
-     * Серия во время розыгрыша. Считаются все карты, сыгранные с последнего сброса счёта,
-     * независимо от порядка. Пара прерывает серию: через неё серия не проходит, поэтому
-     * в раскладе 2-3-3-4 засчитывается только пара, а не серия из трёх.
+     * Серия во время розыгрыша. Считаются карты, сыгранные с последнего сброса счёта,
+     * в том порядке, в каком они легли на стол. Пара обрывает серию, поэтому в раскладе
+     * 2-3-3-4 засчитывается только пара, а не серия из трёх, но 3-3-4-5 серию даёт:
+     * карты после пары собирают её заново.
      */
     fun pegRun(cardsSinceReset: List<Card>): Int {
         if (cardsSinceReset.isEmpty()) return 0
-        val last = cardsSinceReset[cardsSinceReset.size - 1]
-        var start = 0
-        for (i in 0 until cardsSinceReset.size - 1) {
-            if (cardsSinceReset[i].rank == cardsSinceReset[i + 1].rank) start = i + 1
+        // Пара обрывает серию в любом месте, а не только когда карты стоят вплотную:
+        // повторившийся номинал начинает серию заново. Поэтому 3-3-4-5 даёт серию
+        // из трёх, а 3-4-5-4 — только пару: последняя карта разорвала серию.
+        val run = ArrayList<Int>(8)
+        for (c in cardsSinceReset) {
+            if (run.contains(c.rank)) run.clear()
+            run.add(c.rank)
         }
-        val counts = HashMap<Int, Int>(8)
-        for (i in start until cardsSinceReset.size) {
-            val r = cardsSinceReset[i].rank
-            counts[r] = (counts[r] ?: 0) + 1
-        }
-        if ((counts[last.rank] ?: 0) > 1) return 0
-        val ranks = counts.keys.sorted()
-        var lo = 0
-        var hi = 0
-        var found = false
-        for (k in ranks.indices) {
-            if (ranks[k] == last.rank) { lo = k; hi = k; found = true }
-        }
-        if (!found) return 0
-        while (lo - 1 >= 0 && ranks[lo - 1] == ranks[lo] - 1) lo--
-        while (hi + 1 < ranks.size && ranks[hi + 1] == ranks[hi] + 1) hi++
-        for (k in lo..hi) if ((counts[ranks[k]] ?: 0) > 1) return 0
-        val len = hi - lo + 1
+        var len = 1
+        while (len < run.size && run[run.size - 1 - len] == run[run.size - len] - 1) len++
         return if (len >= 3) len else 0
     }
 
