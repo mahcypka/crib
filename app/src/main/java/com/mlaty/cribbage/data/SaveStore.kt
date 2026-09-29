@@ -24,7 +24,7 @@ object SaveStore {
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE)
 
-    fun hasSave(ctx: Context): Boolean = file(ctx).let { it.exists() && it.length() > 0 }
+    fun hasSave(ctx: Context): Boolean = file(ctx).let { it.exists() && it.length() > 0L }
 
     fun clear(ctx: Context) {
         file(ctx).delete()
@@ -50,7 +50,7 @@ object SaveStore {
 
     fun load(ctx: Context): SavedGame? {
         val f = file(ctx)
-        if (!f.exists() || f.length() == 0) return null
+        if (!f.exists() || f.length() == 0L) return null
         return try {
             val root = JSONObject(f.readText())
             val rules = decodeRules(root.getJSONObject("rules"))

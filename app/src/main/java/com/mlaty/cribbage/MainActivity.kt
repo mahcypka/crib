@@ -8,7 +8,6 @@ import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -317,14 +316,16 @@ class MainActivity : Activity(), GameView.Host {
         layoutParams = lp(width = MATCH, top = 4)
     }
 
-    private fun lp(width: Int, height: Int = WRAP, top: Int = 0) =
+    private fun lp(width: Int = WRAP, height: Int = WRAP, top: Int = 0) =
         LinearLayout.LayoutParams(width, height).apply { topMargin = dp(top) }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
 
     companion object {
-        private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
-        private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+        // Литералы вместо ViewGroup.LayoutParams.MATCH_PARENT: значение константы
+        // из Java-поля const val принимает не всегда, а -1 и -2 — это ровно они.
+        private const val MATCH = -1
+        private const val WRAP = -2
 
         private val HELP = """
 Цель — набрать 121 очко раньше компьютера.
