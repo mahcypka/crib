@@ -62,6 +62,16 @@ class Game(val rules: Rules, val seed: Long) {
     var lastShowBonus = ""; private set
     var winner = ""; private set
 
+    /**
+     * Очки за последний сыгранный ход — для всплывающей отметки. Это чисто
+     * украшение розыгрыша, поэтому в сохранение не попадает.
+     */
+    var pegPoints = 0; private set
+    var pegLabel = ""; private set
+    var pegSeat: Seat? = null; private set
+    /** Растёт на каждом начислении: по нему интерфейс понимает, что значок надо показать снова. */
+    var pegSeq = 0; private set
+
     private var passes = 0
     private var lastPlayedBy: Seat? = null
     private var pendingGoSeat: Seat? = null
@@ -105,6 +115,9 @@ class Game(val rules: Rules, val seed: Long) {
         roundAiPoints = 0
         lastShowBonus = ""
         announce = ""
+        pegPoints = 0
+        pegLabel = ""
+        pegSeat = null
         playerDiscardsLeft = 2
         aiDiscardsLeft = 2
         phase = Phase.DISCARD
@@ -203,6 +216,10 @@ class Game(val rules: Rules, val seed: Long) {
 
         addScore(seat, pts)
         roundPoints(seat, pts)
+        pegPoints = pts
+        pegLabel = parts.joinToString(", ")
+        pegSeat = if (pts > 0) seat else null
+        pegSeq++
         announce = buildString {
             append(count)
             if (parts.isNotEmpty()) append("   ").append(parts.joinToString(", "))
@@ -241,6 +258,10 @@ class Game(val rules: Rules, val seed: Long) {
                 addScore(seat, points)
                 roundPoints(seat, points)
                 announce = if (count == 31) "31 — $points очка" else "последняя карта — $points очко"
+                pegPoints = points
+                pegLabel = if (count == 31) "31" else "последняя карта"
+                pegSeat = seat
+                pegSeq++
             }
         }
         count = 0

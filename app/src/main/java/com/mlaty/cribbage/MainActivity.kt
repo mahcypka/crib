@@ -52,7 +52,7 @@ class MainActivity : Activity(), GameView.Host {
         val loaded = SaveStore.load(this)
         if (loaded != null) {
             rules = loaded.rules
-            savedGame = loaded.game
+            savedGame = live(loaded.game)
         }
         showMenu()
     }
@@ -68,8 +68,11 @@ class MainActivity : Activity(), GameView.Host {
         super.onPause()
         handler.removeCallbacks(aiLoop)
         // В меню активной партии нет, но сохранённая ещё должна пережить уход из приложения.
-        SaveStore.save(this, rules, game ?: savedGame)
+        SaveStore.save(this, rules, live(game ?: savedGame))
     }
+
+    /** Завершённая партия не сохраняется и не предлагается к продолжению. */
+    private fun live(g: Game?): Game? = g?.takeIf { it.phase != Phase.OVER }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
@@ -157,14 +160,14 @@ class MainActivity : Activity(), GameView.Host {
         val g = game ?: return
         board.game = g
         board.invalidate()
-        SaveStore.save(this, rules, g)
+        SaveStore.save(this, rules, live(g))
     }
 
     private fun showMenu() {
         handler.removeCallbacks(aiLoop)
         // Текущая партия и есть та, которую предложит «Продолжить»: нельзя
         // подменять её старой сохранённой и затирать свежий прогресс.
-        val keep = game ?: savedGame
+        val keep = live(game ?: savedGame)
         game = null
         savedGame = keep
         SaveStore.save(this, rules, keep)
@@ -228,10 +231,9 @@ class MainActivity : Activity(), GameView.Host {
         })
 
         col.addView(space(26))
-        if (savedGame != null) {
-            col.addView(button("Продолжить партию", true) {
-                savedGame?.let { startGame(it) }
-            })
+        val resume = savedGame
+        if (resume != null) {
+            col.addView(button("Продолжить партию", true) { startGame(resume) })
             col.addView(space(10))
         }
         col.addView(button("Новая партия", true) {

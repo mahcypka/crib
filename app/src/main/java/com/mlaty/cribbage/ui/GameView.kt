@@ -7,6 +7,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
+import com.mlaty.cribbage.game.Breakdown
 import com.mlaty.cribbage.game.Game
 import com.mlaty.cribbage.game.Phase
 import com.mlaty.cribbage.game.Scoring
@@ -51,12 +52,15 @@ class GameView(context: Context, private val host: Host) : View(context) {
         const val A_CONFIRM = 5
         const val A_MENU = 6
         const val TOP_BAR = 54f
+        const val PEG_FADE = 1400f
     }
 
     var game: Game? = null
 
     private val selected = ArrayList<Int>()
     private var note = ""
+    private var lastSeq = -1
+    private var pegAt = 0L
 
     fun setNote(msg: String) {
         note = msg
@@ -207,12 +211,15 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.textSize = dp(10f)
         text.color = Theme.DIM
         c.drawText("счёт вслух", w / 2f, top + dp(50f), text)
+        drawPegBadge(c, g, w - pad, top + dp(6f))
 
         val seqTop = top + boxH + dp(12f)
         if (g.sequence.isNotEmpty()) {
+            val last = g.sequence.size - 1
             val xs = fitRow(g.sequence.size, w - pad * 2, dp(38f), dp(4f), w / 2f, seqTop)
             g.sequence.forEachIndexed { i, card ->
-                drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true)
+                drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true,
+                    if (i == last) Theme.GOLD else 0)
             }
         } else {
             text.textSize = dp(12f)
@@ -276,25 +283,87 @@ class GameView(context: Context, private val host: Host) : View(context) {
             c.drawText("стартовая", w / 2f, y + size * 1.4f + dp(11f), text)
         }
 
-        val panelTop = top + dp(24f) + dp(132f)
-        fill.color = Theme.PANEL
-        rect.set(pad, panelTop, w - pad, panelTop + dp(76f))
-        c.drawRoundRect(rect, dp(10f), dp(10f), fill)
-        text.typeface = Typeface.DEFAULT_BOLD
-        text.textSize = dp(28f)
-        text.color = Theme.GOLD
-        c.drawText(step.breakdown.total.toString(), w / 2f, panelTop + dp(30f), text)
-        text.typeface = Typeface.DEFAULT
-        text.textSize = dp(11f)
-        text.color = Theme.DIM
-        c.drawText(step.breakdown.summary(), w / 2f, panelTop + dp(50f), text)
-        if (g.lastShowBonus.isNotEmpty()) {
-            text.textSize = dp(10f)
-            text.color = Theme.GREEN
-            c.drawText(g.lastShowBonus, w / 2f, panelTop + dp(67f), text)
-        }
+        val panelTop = top + dp(24f) + dp(150f)
+        drawBreakdown(c, step.breakdown, pad, panelTop, w - pad * 2, g.lastShowBonus)
 
         button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f), "Дальше", true, A_NEXT, -1)
+    }
+
+    private class Cat(val name: String, val points: Int, val color: Int)
+
+    /**
+     * Панель подсчёта: крупный итог, затем строки по категориям с полосами —
+     * сразу видно, из чего сложились очки, а не только сумма.
+     */
+    private fun drawBreakdown(
+        c: Canvas, b: Breakdown, x0: Float, y0: Float, width: Float, bonus: String
+    ) {
+        val rows = ArrayList<Cat>()
+        if (b.fifteens > 0) rows.add(Cat("Пятнашки", b.fifteens, Theme.CAT_FIFTEEN))
+        if (b.pairs > 0) rows.add(Cat("Пары", b.pairs, Theme.CAT_PAIR))
+        if (b.runs > 0) rows.add(Cat("Серии", b.runs, Theme.CAT_RUN))
+        if (b.flush > 0) rows.add(Cat("Флеш", b.flush, Theme.CAT_FLUSH))
+        if (b.nobs > 0) rows.add(Cat("Нобс", b.nobs, Theme.CAT_NOBS))
+
+        val rowH = dp(22f)
+        val topH = dp(40f)
+        val tailH = dp(16f) + if (bonus.isEmpty()) 0f else dp(15f)
+        val bodyH = if (rows.isEmpty()) rowH else rows.size * rowH
+        val panelH = topH + bodyH + tailH
+
+        fill.color = Theme.PANEL
+        rect.set(x0, y0, x0 + width, y0 + panelH)
+        c.drawRoundRect(rect, dp(12f), dp(12f), fill)
+
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(34f)
+        text.color = Theme.GOLD
+        c.drawText(b.total.toString(), x0 + width / 2f, y0 + dp(30f), text)
+
+        val labelX = x0 + dp(14f)
+        val barX = x0 + dp(96f)
+        val barMax = width - dp(96f) - dp(46f)
+
+        if (rows.isEmpty()) {
+            text.typeface = Typeface.DEFAULT
+            text.textSize = dp(12f)
+            text.color = Theme.DIM
+            c.drawText("ничего не засчитано", x0 + width / 2f, y0 + topH + dp(16f), text)
+        } else {
+            val maxP = rows.maxOf { it.points }
+            var y = y0 + topH + dp(14f)
+            for (r in rows) {
+                text.textAlign = Paint.Align.LEFT
+                text.typeface = Typeface.DEFAULT
+                text.textSize = dp(12f)
+                text.color = Theme.TEXT
+                c.drawText(r.name, labelX, y, text)
+
+                fill.color = Theme.LINE
+                rect.set(barX, y - dp(7f), barX + barMax, y - dp(3f))
+                c.drawRoundRect(rect, dp(2f), dp(2f), fill)
+                fill.color = r.color
+                val bw = if (maxP > 0) barMax * r.points / maxP else 0f
+                rect.set(barX, y - dp(7f), barX + bw, y - dp(3f))
+                c.drawRoundRect(rect, dp(2f), dp(2f), fill)
+
+                text.textAlign = Paint.Align.CENTER
+                text.typeface = Typeface.DEFAULT_BOLD
+                text.textSize = dp(13f)
+                text.color = r.color
+                c.drawText(r.points.toString(), x0 + width - dp(20f), y, text)
+                y += rowH
+            }
+        }
+
+        if (bonus.isNotEmpty()) {
+            text.textAlign = Paint.Align.CENTER
+            text.typeface = Typeface.DEFAULT
+            text.textSize = dp(11f)
+            text.color = Theme.GREEN
+            c.drawText(bonus, x0 + width / 2f, y0 + panelH - dp(7f), text)
+        }
     }
 
     // ---------------------------------------------------------------- конец партии
@@ -328,6 +397,37 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private fun handTop(h: Float) = h - dp(116f) - dp(104f) - dp(10f)
 
     private fun cardH(w: Float) = min(w * 1.4f, dp(88f))
+
+    /**
+     * Золотая отметка «+N» рядом со счётом: показывает, сколько только что
+     * начислено за сыгранную карту, и плавно гаснет.
+     */
+    private fun drawPegBadge(c: Canvas, g: Game, right: Float, y: Float) {
+        if (g.pegSeq != lastSeq) {
+            lastSeq = g.pegSeq
+            pegAt = System.currentTimeMillis()
+            if (g.pegPoints > 0) postDelayed({ invalidate() }, 60L)
+        }
+        val age = System.currentTimeMillis() - pegAt
+        if (g.pegPoints <= 0 || age > PEG_FADE) return
+        val alpha = (255 * (1f - age.toFloat() / PEG_FADE)).toInt().coerceIn(0, 255)
+        val label = "+${g.pegPoints}"
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(18f)
+        text.color = Theme.INK
+        val bw = text.measureText(label) + dp(20f)
+        val bh = dp(27f)
+        val x = right - bw
+        text.alpha = alpha
+        fill.alpha = alpha
+        fill.color = Theme.GOLD
+        rect.set(x, y, x + bw, y + bh)
+        c.drawRoundRect(rect, dp(13f), dp(13f), fill)
+        c.drawText(label, x + bw / 2f, y + dp(19f), text)
+        text.alpha = 255
+        fill.alpha = 255
+        text.color = Theme.TEXT
+    }
 
     /** К crib достаётся сдающему, а сдающий меняется каждый раунд. */
     private fun cribOwner(g: Game): String =
@@ -409,7 +509,8 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
     private fun drawCard(
         c: Canvas, x: Float, w: Float, top: Float, card: Card?,
-        faceUp: Boolean, highlight: Boolean, selectable: Boolean
+        faceUp: Boolean, highlight: Boolean, selectable: Boolean,
+        accent: Int = 0
     ) {
         val h = cardH(w)
         val r = dp(5f)
@@ -442,6 +543,12 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
         if (highlight) {
             stroke.color = Theme.GREEN
+            stroke.strokeWidth = dp(2.4f)
+            rect.set(x - dp(2f), top - dp(2f), x + w + dp(2f), top + h + dp(2f))
+            c.drawRoundRect(rect, r, r, stroke)
+        }
+        if (accent != 0) {
+            stroke.color = accent
             stroke.strokeWidth = dp(2.4f)
             rect.set(x - dp(2f), top - dp(2f), x + w + dp(2f), top + h + dp(2f))
             c.drawRoundRect(rect, r, r, stroke)

@@ -18,4 +18,10 @@ object Theme {
     const val BACK = 0xFF2B4C7E.toInt()
     const val BACK_D = 0xFF1A3459.toInt()
     const val INK = 0xFF1A1A1A.toInt()
+    // Цвета категорий при подсчёте — по ним видно, за что начислено.
+    const val CAT_FIFTEEN = 0xFFF0C860.toInt()
+    const val CAT_PAIR = 0xFF7FD89A.toInt()
+    const val CAT_RUN = 0xFF7FB8FF.toInt()
+    const val CAT_FLUSH = 0xFFC79BFF.toInt()
+    const val CAT_NOBS = 0xFFE8645A.toInt()
 }
