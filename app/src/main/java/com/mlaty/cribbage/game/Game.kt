@@ -86,6 +86,9 @@ class Game(val rules: Rules, val seed: Long) {
             playerSix.add(deck.removeAt(0))
             aiSix.add(deck.removeAt(0))
         }
+        // Рука игрока сразу по номиналу: туз, двойка, ... король. Дальше порядок
+        // сохраняется сам — отбросы и сыгранные карты просто удаляются из списка.
+        playerSix.sortWith(compareBy({ it.rank }, { it.suit }))
         playerFour = mutableListOf()
         aiFour = mutableListOf()
         playerLeft = mutableListOf()

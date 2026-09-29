@@ -111,6 +111,13 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.color = Theme.DIM
         c.drawText("КОМПЬЮТЕР", w - dp(36f), dp(37f), text)
 
+        // Метка сдающего: к crib достаётся именно ему, а он меняется каждый раунд.
+        text.textSize = dp(9f)
+        text.color = Theme.GOLD
+        val dealerTag = if (g.aiIsDealer) "ВЫ СДАЁТЕ" else "СДАЁТ"
+        val tagX = if (g.aiIsDealer) dp(46f) else w - dp(42f)
+        c.drawText(dealerTag, tagX, dp(50f), text)
+
         text.textSize = dp(12f)
         c.drawText("раунд ${g.round}", w / 2f, dp(22f), text)
         text.textSize = dp(11f)
@@ -149,7 +156,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(12f)
             text.color = Theme.GOLD
-            c.drawText("к crib: ${g.crib.size}", w / 2f, cribTop + dp(10f), text)
+            c.drawText("${cribOwner(g)}: ${g.crib.size}", w / 2f, cribTop + dp(10f), text)
             val xs = fitRow(g.crib.size, w - pad * 2, dp(30f), dp(4f), w / 2f, cribTop + dp(18f))
             // к crib лежит рубашкой: чужие отбросы игроку показывать рано
             g.crib.indices.forEach { i ->
@@ -161,7 +168,6 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.textSize = dp(12f)
         text.color = Theme.DIM
         c.drawText("Ваши карты", w / 2f, handY - dp(8f), text)
-
         val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerSix.forEachIndexed { i, card ->
             val sel = selected.contains(i)
@@ -215,18 +221,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
 
         val annTop = handY - dp(40f)
-
-        // Стартовая карта привязана к панели объявления снизу, а не к ряду сверху:
-        // на невысоких экранах иначе подпись налезала бы на панель.
-        g.starter?.let { st ->
-            val size = dp(28f)
-            val y = annTop - dp(48f)
-            drawCard(c, w / 2f - size, y, size, st, true, false, true)
-            text.typeface = Typeface.DEFAULT
-            text.textSize = dp(10f)
-            text.color = Theme.DIM
-            c.drawText("стартовая карта", w / 2f, y + size * 1.4f + dp(11f), text)
-        }
+        drawCrib(c, g, w, annTop - dp(44f))
 
         fill.color = Theme.PANEL
         rect.set(pad, annTop, w - pad, annTop + dp(32f))
@@ -274,7 +269,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         g.starter?.let { st ->
             val size = dp(24f)
             val y = top + dp(24f) + dp(56f) * 1.4f + dp(8f)
-            drawCard(c, w / 2f - size, y, size, st, true, false, true)
+            drawCard(c, w / 2f - size, size, y, st, true, false, true)
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(10f)
             text.color = Theme.DIM
@@ -333,6 +328,42 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private fun handTop(h: Float) = h - dp(116f) - dp(104f) - dp(10f)
 
     private fun cardH(w: Float) = min(w * 1.4f, dp(88f))
+
+    /** К crib достаётся сдающему, а сдающий меняется каждый раунд. */
+    private fun cribOwner(g: Game): String =
+        if (g.aiIsDealer) "к crib компьютера" else "ваш к crib"
+
+    /**
+     * К crib рубашкой рядом со стартовой картой — как на настоящем столе.
+     * Подписи вынесены наверх: снизу им не поместиться, на невысоких экранах
+     * они наезжали бы на панель объявления.
+     */
+    private fun drawCrib(c: Canvas, g: Game, w: Float, y: Float) {
+        val cw = dp(24f)
+        val gap = dp(3f)
+        val sw = dp(28f)
+        val n = g.crib.size
+        val cribW = if (n > 0) n * cw + (n - 1) * gap else 0f
+        val spacer = if (n > 0) dp(12f) else 0f
+        val left = w / 2f - (cribW + spacer + sw) / 2f
+        var x = left
+        for (i in 0 until n) {
+            drawCard(c, x, cw, y, null, false, false, false)
+            x += cw + gap
+        }
+        val sx = left + cribW + spacer
+        g.starter?.let { drawCard(c, sx, sw, y, it, true, false, true) }
+
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(10f)
+        text.color = Theme.DIM
+        if (n > 0) {
+            text.textAlign = Paint.Align.LEFT
+            c.drawText(cribOwner(g), left, y - dp(5f), text)
+        }
+        text.textAlign = Paint.Align.CENTER
+        c.drawText("стартовая", sx + sw / 2f, y - dp(5f), text)
+    }
 
     private fun addCardHit(x: Float, w: Float, top: Float, action: Int, index: Int) {
         val h = cardH(w)
