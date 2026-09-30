@@ -55,7 +55,24 @@ class GameView(context: Context, private val host: Host) : View(context) {
         const val A_MENU = 6
         const val TOP_BAR = 54f
         const val PEG_FADE = 1400f
+        /** Сколько летит сыгранная карта от руки к столу. */
+        const val FLY_MS = 1500f
     }
+
+    /**
+     * Полёт одной карты к столу. Ряды сдвигаются из раскладки до хода в раскладку
+     * после него, а сама карта летит из той руки, которая её сыграла.
+     */
+    private class Flight(
+        val opp: FloatArray, val seq: FloatArray, val hand: FloatArray,
+        val from: FloatArray, val faceUp: Boolean, val startAt: Long
+    )
+
+    /** Раскладки для отрисовки: у каждой либо своя, либо промержуток между двумя. */
+    private class Rows(
+        val opp: FloatArray, val seq: FloatArray, val hand: FloatArray,
+        val fly: FloatArray?, val flyFaceUp: Boolean
+    )
 
     var game: Game? = null
 
@@ -63,6 +80,19 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private var note = ""
     private var lastSeq = -1
     private var pegAt = 0L
+
+    // Раскладки рядов на прошлом кадре: из них анимация берёт начало полёта.
+    private var prevOpp = FloatArray(0)
+    private var prevSeq = FloatArray(0)
+    private var prevHand = FloatArray(0)
+    private var prevOppCards: List<Card> = emptyList()
+    private var prevHandCards: List<Card> = emptyList()
+    private var seqSig = ""
+    private var flight: Flight? = null
+
+    /** Идёт ли анимация хода: до её конца карты не принимаются. */
+    fun isBusy(): Boolean = flight != null &&
+        System.currentTimeMillis() - flight!!.startAt < FLY_MS
 
     fun setNote(msg: String) {
         note = msg
@@ -82,6 +112,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val w = width.toFloat()
         val h = height.toFloat()
         val pad = dp(10f)
+        if (g.phase != Phase.PLAY) { flight = null; seqSig = "" }
         when (g.phase) {
             Phase.OVER -> drawGameOver(c, g, w, h)
             Phase.DISCARD -> drawDiscard(c, g, w, h, pad)
@@ -89,6 +120,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             Phase.SHOW -> drawShow(c, g, w, h, pad)
         }
         drawTopBar(c, g, w)
+        if (flight != null) postInvalidateOnAnimation()
     }
 
     // ---------------------------------------------------------------- верхняя панель
@@ -144,7 +176,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
     // ---------------------------------------------------------------- отброс в к crib
 
     private fun drawDiscard(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
-        drawOpponent(c, g, w, pad, g.aiSix.size)
+        drawOpponent(c, w, opponentRow(g.aiSix.size, w, pad))
 
         val handY = handTop(h)
         val mid = dp(TOP_BAR) + dp(88f) + dp(8f)
@@ -195,13 +227,20 @@ class GameView(context: Context, private val host: Host) : View(context) {
     // ---------------------------------------------------------------- розыгрыш до 31
 
     private fun drawPlay(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
-        drawOpponent(c, g, w, pad, g.aiLeft.size)
-
         val handY = handTop(h)
         val top = dp(TOP_BAR) + dp(88f) + dp(10f)
         val tableBottom = handY - dp(48f)
 
         val boxH = min(dp(56f), max(dp(46f), (tableBottom - top) * 0.42f))
+        val seqTop = top + boxH + dp(12f)
+
+        val rows = animate(g,
+            opponentRow(g.aiLeft.size, w, pad),
+            fitRow(g.sequence.size, w - pad * 2, dp(38f), dp(4f), w / 2f, seqTop),
+            fitRow(g.playerLeft.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY))
+
+        drawOpponent(c, w, rows.opp)
+
         fill.color = Theme.PANEL
         rect.set(pad, top, w - pad, top + boxH)
         c.drawRoundRect(rect, dp(10f), dp(10f), fill)
@@ -217,18 +256,23 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val aiSide = g.pegSeat == Seat.AI
         drawPegBadge(c, g, if (aiSide) w - pad else pad, top + dp(6f), aiSide)
 
-        val seqTop = top + boxH + dp(12f)
-        if (g.sequence.isNotEmpty()) {
-            val last = g.sequence.size - 1
-            val xs = fitRow(g.sequence.size, w - pad * 2, dp(38f), dp(4f), w / 2f, seqTop)
-            g.sequence.forEachIndexed { i, card ->
-                drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, false, true,
-                    if (i == last) Theme.GOLD else 0)
+        val n = g.sequence.size
+        // Пока карта летит, её место в ряду пустует — иначе она нарисовалась бы дважды.
+        val flying = rows.fly != null
+        val shown = if (flying) n - 1 else n
+        if (shown > 0) {
+            for (i in 0 until shown) {
+                val accent = if (!flying && i == shown - 1) Theme.GOLD else 0
+                drawCard(c, rows.seq[i * 3], rows.seq[i * 3 + 1], rows.seq[i * 3 + 2],
+                    g.sequence[i], true, false, true, accent)
             }
-        } else {
+        } else if (!flying) {
             text.textSize = dp(12f)
             text.color = Theme.DIM
             c.drawText("карты на столе", w / 2f, seqTop + dp(22f), text)
+        }
+        rows.fly?.let { fx ->
+            drawCard(c, fx[0], fx[1], fx[2], g.sequence[n - 1], rows.flyFaceUp, false, true, Theme.GOLD)
         }
 
         val annTop = handY - dp(40f)
@@ -242,11 +286,13 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.color = Theme.TEXT
         c.drawText(g.announce, w / 2f, annTop + dp(21f), text)
 
-        val xs = fitRow(g.playerLeft.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
-        g.playerLeft.forEachIndexed { i, card ->
-            val can = g.turn == Seat.PLAYER && g.count + Scoring.value(card.rank) <= 31
-            drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], card, true, can, true)
-            if (can) addCardHit(xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], A_PLAY, i)
+        for (i in g.playerLeft.indices) {
+            val can = g.turn == Seat.PLAYER && g.count + Scoring.value(g.playerLeft[i].rank) <= 31
+            val x = rows.hand[i * 3]
+            val cw = rows.hand[i * 3 + 1]
+            val top2 = rows.hand[i * 3 + 2]
+            drawCard(c, x, cw, top2, g.playerLeft[i], true, can, true)
+            if (can) addCardHit(x, cw, top2, A_PLAY, i)
         }
 
         when {
@@ -259,10 +305,67 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
     }
 
+    // ---------------------------------------------------------------- полёт карты
+
+    /**
+     * Запускает анимацию, если на столе только что добавилась карта, и отдаёт
+     * раскладки для отрисовки. Пока карта летит, ряды не прыгают на новые места,
+     * а плавно сдвигаются, а сама карта идёт от руки к столу и ложится последней.
+     */
+    private fun animate(g: Game, opp: FloatArray, seq: FloatArray, hand: FloatArray): Rows {
+        val sig = g.sequence.joinToString(",") { it.id.toString() }
+        val grew = sig.isNotEmpty() && (seqSig.isEmpty() || sig.startsWith("$seqSig,"))
+        if (grew) {
+            val card = g.sequence.last()
+            val byAi = g.lastPegSeat == Seat.AI
+            val fromCards = if (byAi) prevOppCards else prevHandCards
+            val fromRow = if (byAi) prevOpp else prevHand
+            val i = fromCards.indexOfFirst { it.id == card.id }
+            if (i >= 0 && i * 3 + 2 < fromRow.size) {
+                flight = Flight(prevOpp, prevSeq, prevHand,
+                    floatArrayOf(fromRow[i * 3], fromRow[i * 3 + 1], fromRow[i * 3 + 2]),
+                    !byAi, System.currentTimeMillis())
+            }
+        }
+        seqSig = sig
+
+        // Раскладки прошлого кадра всегда обновляем: пока идёт полёт, они нужны
+        // как начало следующего, а не как то, что на самом деле нарисовано.
+        prevOpp = opp; prevOppCards = g.aiLeft.toList()
+        prevSeq = seq
+        prevHand = hand; prevHandCards = g.playerLeft.toList()
+
+        val f = flight ?: return Rows(opp, seq, hand, null, false)
+        val t = ((System.currentTimeMillis() - f.startAt) / FLY_MS).coerceIn(0f, 1f)
+        if (t >= 1f) {
+            flight = null
+            return Rows(opp, seq, hand, null, false)
+        }
+        val e = ease(t)
+        val last = (seq.size / 3 - 1).coerceAtLeast(0) * 3
+        return Rows(slide(f.opp, opp, e), slide(f.seq, seq, e), slide(f.hand, hand, e),
+            floatArrayOf(
+                f.from[0] + (seq[last] - f.from[0]) * e,
+                f.from[1] + (seq[last + 1] - f.from[1]) * e,
+                f.from[2] + (seq[last + 2] - f.from[2]) * e
+            ), f.faceUp)
+    }
+
+    /** Плавное замедление к концу полёта: карта мягко кладётся, а не останавливается рывком. */
+    private fun ease(t: Float) = 1f - (1f - t) * (1f - t) * (1f - t)
+
+    /** Промежуточная раскладка: у ряда, который стал короче, лишние слоты просто исчезают. */
+    private fun slide(from: FloatArray, to: FloatArray, e: Float): FloatArray {
+        if (e >= 1f) return to
+        val out = FloatArray(to.size)
+        for (i in to.indices) out[i] = if (i < from.size) from[i] + (to[i] - from[i]) * e else to[i]
+        return out
+    }
+
     // ---------------------------------------------------------------- подсчёт очков
 
     private fun drawShow(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
-        drawOpponent(c, g, w, pad, 0)
+        drawOpponent(c, w, opponentRow(0, w, pad))
 
         val step = g.showStep()
         val starter = g.starter!!
@@ -414,17 +517,23 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
     // ---------------------------------------------------------------- общие элементы
 
-    private fun drawOpponent(c: Canvas, g: Game, w: Float, pad: Float, cardsLeft: Int) {
+    private fun drawOpponent(c: Canvas, w: Float, xs: FloatArray) {
         fill.color = Theme.PANEL
         c.drawRect(0f, dp(TOP_BAR), w, dp(TOP_BAR) + dp(88f), fill)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(12f)
         text.color = Theme.DIM
         c.drawText("Компьютер", w / 2f, dp(TOP_BAR) + dp(18f), text)
-        val n = max(cardsLeft, 1)
-        val xs = fitRow(n, w - pad * 2, dp(28f), dp(4f), w / 2f, dp(TOP_BAR) + dp(28f))
-        repeat(n) { i -> drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], null, false, false, false) }
+        var i = 0
+        while (i < xs.size / 3) {
+            drawCard(c, xs[i * 3], xs[i * 3 + 1], xs[i * 3 + 2], null, false, false, false)
+            i++
+        }
     }
+
+    /** Ряд рубашек компьютера: минимум одна, иначе строка схлопывается в точку. */
+    private fun opponentRow(n: Int, w: Float, pad: Float) =
+        fitRow(max(n, 1), w - pad * 2, dp(28f), dp(4f), w / 2f, dp(TOP_BAR) + dp(28f))
 
     private fun handTop(h: Float) = h - dp(116f) - dp(104f) - dp(10f)
 
@@ -592,6 +701,8 @@ class GameView(context: Context, private val host: Host) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action != MotionEvent.ACTION_UP) return true
         val g = game ?: return true
+        // Пока карта летит, ход не принимается: иначе следующий начнётся поверх.
+        if (flight != null) return true
         for (i in hits.indices.reversed()) {
             val hit = hits[i]
             if (!hit.r.contains(event.x, event.y)) continue

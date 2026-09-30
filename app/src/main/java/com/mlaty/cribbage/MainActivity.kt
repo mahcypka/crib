@@ -90,6 +90,10 @@ class MainActivity : Activity(), GameView.Host {
         override fun run() {
             val g = game ?: return
             if (board.parent == null) return
+            // Предыдущая карта ещё летит на стол. Ход ждёт: иначе следующая полетела бы
+            // поверх, и обе остановились бы на середине. Счётчик простоя тут не растёт —
+            // ждать нужно сколько угодно, это не отказ ходить.
+            if (board.isBusy()) { handler.postDelayed(this, 100L); return }
             var acted = false
             when {
                 g.phase == Phase.DISCARD && g.aiDiscardsLeft > 0 -> { g.aiDiscard(); acted = true }

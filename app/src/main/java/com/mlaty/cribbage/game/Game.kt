@@ -73,6 +73,12 @@ class Game(val rules: Rules, val seed: Long) {
     /** Растёт на каждом начислении: по нему интерфейс понимает, что значок надо показать снова. */
     var pegSeq = 0; private set
 
+    /**
+     * Кто сыграл последнюю карту. В отличие от pegSeat не обнуляется, когда ход
+     * ничего не принёс: интерфейсу нужно знать, из чьей руки вести карту к столу.
+     */
+    var lastPegSeat: Seat? = null; private set
+
     private var passes = 0
     private var lastPlayedBy: Seat? = null
     private var pendingGoSeat: Seat? = null
@@ -119,6 +125,7 @@ class Game(val rules: Rules, val seed: Long) {
         pegPoints = 0
         pegLabel = ""
         pegSeat = null
+        lastPegSeat = null
         playerDiscardsLeft = 2
         aiDiscardsLeft = 2
         phase = Phase.DISCARD
@@ -201,6 +208,7 @@ class Game(val rules: Rules, val seed: Long) {
     private fun playCard(seat: Seat, card: Card) {
         passes = 0
         lastPlayedBy = seat
+        lastPegSeat = seat
         count += Scoring.value(card.rank)
         sequence.add(card)
 
