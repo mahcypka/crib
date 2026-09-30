@@ -1,6 +1,7 @@
 package com.mlaty.cribbage
 
 import android.app.Activity
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -16,10 +17,14 @@ import com.mlaty.cribbage.data.SaveStore
 import com.mlaty.cribbage.game.Game
 import com.mlaty.cribbage.game.Phase
 import com.mlaty.cribbage.game.Seat
+import com.mlaty.cribbage.model.BackStyle
 import com.mlaty.cribbage.model.Difficulty
+import com.mlaty.cribbage.model.FlySpeed
 import com.mlaty.cribbage.model.Rules
+import com.mlaty.cribbage.model.TableStyle
 import com.mlaty.cribbage.model.WinMode
 import com.mlaty.cribbage.ui.GameView
+import com.mlaty.cribbage.ui.TableColors
 import com.mlaty.cribbage.ui.Theme
 import kotlin.math.roundToInt
 
@@ -34,6 +39,9 @@ class MainActivity : Activity(), GameView.Host {
     private var savedGame: Game? = null
     private var idleTicks = 0
 
+    /** Палитра сукна. Считается из правил, чтобы фон меню и поля всегда совпадали. */
+    private val pal: TableColors get() = Theme.palette(rules.table)
+
     private val goals = listOf(
         Goal("121 очко", WinMode.SCORE, 121),
         Goal("61 очко", WinMode.SCORE, 61),
@@ -45,16 +53,28 @@ class MainActivity : Activity(), GameView.Host {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        root = FrameLayout(this).apply { setBackgroundColor(Theme.BG) }
-        board = GameView(this, this)
-        setContentView(root)
-
+        // Сохранение читаем до создания экрана: иначе первый кадр будет зелёным,
+        // а сохранённый стол — синим, и это мелькнёт при запуске.
         val loaded = SaveStore.load(this)
         if (loaded != null) {
             rules = loaded.rules
             savedGame = live(loaded.game)
         }
+        applySystemColors()
+        root = FrameLayout(this).apply { setBackgroundColor(pal.bg) }
+        board = GameView(this, this)
+        setContentView(root)
         showMenu()
+    }
+
+    /**
+     * Окно и системные панели повторяют цвет сукна. Иначе при запуске на них
+     * мелькает чёрная полоса — это уже случалось в проекте.
+     */
+    private fun applySystemColors() {
+        window.setBackgroundDrawable(ColorDrawable(pal.bg))
+        window.statusBarColor = pal.statusBar
+        window.navigationBarColor = pal.statusBar
     }
 
     override fun onResume() {
@@ -163,6 +183,7 @@ class MainActivity : Activity(), GameView.Host {
     private fun refresh() {
         val g = game ?: return
         board.game = g
+        board.look = rules
         board.invalidate()
         SaveStore.save(this, rules, live(g))
     }
@@ -175,20 +196,22 @@ class MainActivity : Activity(), GameView.Host {
         game = null
         savedGame = keep
         SaveStore.save(this, rules, keep)
+        applySystemColors()
+        root.setBackgroundColor(pal.bg)
         root.removeAllViews()
         root.addView(buildMenu(), FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
     private fun buildMenu(): View {
         val scroll = ScrollView(this)
-        scroll.setBackgroundColor(Theme.BG)
+        scroll.setBackgroundColor(pal.bg)
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(dp(20), dp(26), dp(20), dp(28))
         scroll.addView(col)
 
         col.addView(label("КРИББЕЖ", 27f, Theme.TEXT, true))
-        col.addView(label("Офлайн-игра против компьютера", 13f, Theme.DIM))
+        col.addView(label("Офлайн-игра против компьютера", 13f, pal.dim))
         col.addView(space(18))
 
         col.addView(label("Сложность", 14f, Theme.GOLD, true))
@@ -198,7 +221,36 @@ class MainActivity : Activity(), GameView.Host {
             showMenu()
         })
         col.addView(space(6))
-        col.addView(label(rules.difficulty.hint, 12f, Theme.DIM))
+        col.addView(label(rules.difficulty.hint, 12f, pal.dim))
+
+        col.addView(space(20))
+        col.addView(label("Оформление стола", 14f, Theme.GOLD, true))
+        col.addView(space(8))
+        col.addView(label("Время полёта карты", 12f, Theme.TEXT))
+        col.addView(chips(FlySpeed.choices.map { FlySpeed.title(it) },
+            FlySpeed.choices.indexOf(rules.flyMs).let { if (it < 0) 2 else it }, 12f) { i ->
+            rules = rules.copy(flyMs = FlySpeed.choices[i])
+            showMenu()
+        })
+        col.addView(space(6))
+        col.addView(label(
+            if (rules.flyMs == FlySpeed.NONE) "Карта кладётся сразу, ход не ждёт анимации"
+            else "Пока карта летит, ход ждёт — иначе компьютер ходил бы поверх",
+            12f, pal.dim))
+        col.addView(space(12))
+        col.addView(label("Рубашка", 12f, Theme.TEXT))
+        val backs = BackStyle.values()
+        col.addView(chips(backs.map { it.title }, backs.indexOf(rules.back).let { if (it < 0) 0 else it }, 12f) { i ->
+            rules = rules.copy(back = backs[i])
+            showMenu()
+        })
+        col.addView(space(12))
+        col.addView(label("Цвет сукна", 12f, Theme.TEXT))
+        val tables = TableStyle.values()
+        col.addView(chips(tables.map { it.title }, tables.indexOf(rules.table).let { if (it < 0) 0 else it }, 12f) { i ->
+            rules = rules.copy(table = tables[i])
+            showMenu()
+        })
 
         col.addView(space(20))
         col.addView(label("Победа", 14f, Theme.GOLD, true))
@@ -211,7 +263,7 @@ class MainActivity : Activity(), GameView.Host {
             showMenu()
         })
         col.addView(space(6))
-        col.addView(label("Цель: ${rules.goalText}", 12f, Theme.DIM))
+        col.addView(label("Цель: ${rules.goalText}", 12f, pal.dim))
 
         col.addView(space(20))
         col.addView(label("Дополнительные правила", 14f, Theme.GOLD, true))
@@ -246,14 +298,14 @@ class MainActivity : Activity(), GameView.Host {
         col.addView(space(10))
         col.addView(button("Как играть", false) { showHelp() })
         col.addView(space(20))
-        col.addView(label("Партия сохраняется после каждого хода и не пропадёт, если Android выгрузит приложение из памяти.", 11f, Theme.DIM))
+        col.addView(label("Партия сохраняется после каждого хода и не пропадёт, если Android выгрузит приложение из памяти.", 11f, pal.dim))
         return scroll
     }
 
     private fun showHelp() {
         root.removeAllViews()
         val scroll = ScrollView(this)
-        scroll.setBackgroundColor(Theme.BG)
+        scroll.setBackgroundColor(pal.bg)
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(dp(20), dp(26), dp(20), dp(28))
@@ -278,13 +330,19 @@ class MainActivity : Activity(), GameView.Host {
 
     private fun space(dp: Int) = View(this).apply { layoutParams = lp(height = dp) }
 
-    private fun chips(options: List<String>, selected: Int, onPick: (Int) -> Unit): View {
+    /**
+     * Ряд переключателей. sizeSp меньше стандартного там, где вариантов четыре
+     * и подписи не помещаются в ширину экрана — на 336 dp чип выходит ~68 dp.
+     */
+    private fun chips(
+        options: List<String>, selected: Int, sizeSp: Float = 13f, onPick: (Int) -> Unit
+    ): View {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         for (i in options.indices) {
-            val c = chip(options[i], i == selected) { onPick(i) }
+            val c = chip(options[i], i == selected, sizeSp) { onPick(i) }
             c.layoutParams = LinearLayout.LayoutParams(0, MATCH, 1f).apply {
-                if (i > 0) marginStart = dp(8)
+                if (i > 0) marginStart = dp(6)
             }
             row.addView(c)
         }
@@ -292,16 +350,16 @@ class MainActivity : Activity(), GameView.Host {
         return row
     }
 
-    private fun chip(text: String, selected: Boolean, onClick: () -> Unit) = TextView(this).apply {
+    private fun chip(text: String, selected: Boolean, sizeSp: Float, onClick: () -> Unit) = TextView(this).apply {
         this.text = text
         gravity = Gravity.CENTER
         setTextColor(if (selected) Theme.INK else Theme.TEXT)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-        setPadding(dp(8), dp(10), dp(8), dp(10))
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+        setPadding(dp(6), dp(10), dp(6), dp(10))
         background = GradientDrawable().apply {
             cornerRadius = dp(10).toFloat()
-            setColor(if (selected) Theme.GREEN else Theme.PANEL)
-            if (!selected) setStroke(dp(1), Theme.LINE)
+            setColor(if (selected) pal.player else pal.panel)
+            if (!selected) setStroke(dp(1), pal.line)
         }
         setOnClickListener { onClick() }
     }
@@ -309,14 +367,14 @@ class MainActivity : Activity(), GameView.Host {
     private fun button(text: String, filled: Boolean, onClick: () -> Unit) = TextView(this).apply {
         this.text = text
         gravity = Gravity.CENTER
-        setTextColor(if (filled) Theme.TEXT else Theme.DIM)
+        setTextColor(if (filled) Theme.TEXT else pal.dim)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         setTypeface(typeface, android.graphics.Typeface.BOLD)
         setPadding(dp(12), dp(16), dp(12), dp(16))
         background = GradientDrawable().apply {
             cornerRadius = dp(12).toFloat()
-            setColor(if (filled) Theme.GREEN_D else Theme.PANEL)
-            setStroke(dp(1), if (filled) Theme.GREEN else Theme.LINE)
+            setColor(if (filled) pal.playerD else pal.panel)
+            setStroke(dp(1), if (filled) pal.player else pal.line)
         }
         setOnClickListener { onClick() }
         layoutParams = lp(width = MATCH, top = 4)

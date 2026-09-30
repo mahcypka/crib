@@ -14,7 +14,11 @@ import com.mlaty.cribbage.game.Game
 import com.mlaty.cribbage.game.Phase
 import com.mlaty.cribbage.game.Scoring
 import com.mlaty.cribbage.game.Seat
+import com.mlaty.cribbage.model.BackStyle
 import com.mlaty.cribbage.model.Card
+import com.mlaty.cribbage.model.FlySpeed
+import com.mlaty.cribbage.model.Rules
+import com.mlaty.cribbage.model.TableStyle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -55,8 +59,6 @@ class GameView(context: Context, private val host: Host) : View(context) {
         const val A_MENU = 6
         const val TOP_BAR = 54f
         const val PEG_FADE = 1400f
-        /** Сколько летит сыгранная карта от руки к столу. */
-        const val FLY_MS = 1500f
     }
 
     /**
@@ -90,9 +92,33 @@ class GameView(context: Context, private val host: Host) : View(context) {
     private var seqSig = ""
     private var flight: Flight? = null
 
+    // Внешний вид задаётся хостом из настроек меню, а не берётся из партии:
+    // оформление не относится к правилам, и смена цвета должна действовать и на сохранённую партию.
+    var look: Rules = Rules()
+        set(value) {
+            field = value
+            appliedTable = null
+            applyLook(value)
+            invalidate()
+        }
+
+    private var pal: TableColors = Theme.palette(TableStyle.GREEN)
+    private var appliedTable: TableStyle? = null
+    private var flyMs = FlySpeed.NORMAL.toFloat()
+    private var backStyle = BackStyle.PLAIN
+
+    private fun applyLook(r: Rules) {
+        if (appliedTable != r.table) {
+            appliedTable = r.table
+            pal = Theme.palette(r.table)
+        }
+        flyMs = r.flyMs.toFloat()
+        backStyle = r.back
+    }
+
     /** Идёт ли анимация хода: до её конца карты не принимаются. */
     fun isBusy(): Boolean = flight != null &&
-        System.currentTimeMillis() - flight!!.startAt < FLY_MS
+        System.currentTimeMillis() - flight!!.startAt < flyMs
 
     fun setNote(msg: String) {
         note = msg
@@ -106,7 +132,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
     // ---------------------------------------------------------------- сцена
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(Theme.BG)
+        c.drawColor(pal.bg)
         hits.clear()
         val g = game ?: return
         val w = width.toFloat()
@@ -126,18 +152,18 @@ class GameView(context: Context, private val host: Host) : View(context) {
     // ---------------------------------------------------------------- верхняя панель
 
     private fun drawTopBar(c: Canvas, g: Game, w: Float) {
-        fill.color = Theme.PANEL
+        fill.color = pal.panel
         c.drawRect(0f, 0f, w, dp(TOP_BAR), fill)
-        fill.color = Theme.LINE
+        fill.color = pal.line
         c.drawRect(0f, dp(TOP_BAR) - dp(1f), w, dp(TOP_BAR), fill)
 
         text.typeface = Typeface.DEFAULT_BOLD
         text.textSize = dp(19f)
-        text.color = Theme.GREEN
+        text.color = pal.player
         c.drawText(g.playerScore.toString(), dp(36f), dp(23f), text)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(11f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("ВЫ", dp(36f), dp(37f), text)
 
         text.typeface = Typeface.DEFAULT_BOLD
@@ -146,7 +172,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c.drawText(g.aiScore.toString(), w - dp(36f), dp(23f), text)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(11f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("КОМПЬЮТЕР", w - dp(36f), dp(37f), text)
 
         // Метка сдающего: к crib достаётся именно ему, а он меняется каждый раунд.
@@ -164,11 +190,11 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val barW = w * 0.30f
         val left = w / 2f - barW / 2f
         val top = dp(43f)
-        fill.color = Theme.LINE
+        fill.color = pal.line
         rect.set(left, top, left + barW, top + dp(4f))
         c.drawRoundRect(rect, dp(2f), dp(2f), fill)
         val frac = (g.playerScore.toFloat() / g.rules.goalValue).coerceIn(0f, 1f)
-        fill.color = Theme.GREEN
+        fill.color = pal.player
         rect.set(left, top, left + barW * frac, top + dp(4f))
         c.drawRoundRect(rect, dp(2f), dp(2f), fill)
     }
@@ -204,7 +230,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(12f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("Ваши карты", w / 2f, handY - dp(8f), text)
         val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerSix.forEachIndexed { i, card ->
@@ -241,16 +267,16 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
         drawOpponent(c, w, rows.opp)
 
-        fill.color = Theme.PANEL
+        fill.color = pal.panel
         rect.set(pad, top, w - pad, top + boxH)
         c.drawRoundRect(rect, dp(10f), dp(10f), fill)
         text.typeface = Typeface.DEFAULT_BOLD
         text.textSize = dp(32f)
-        text.color = if (g.turn == Seat.PLAYER) Theme.GOLD else Theme.DIM
+        text.color = if (g.turn == Seat.PLAYER) Theme.GOLD else pal.dim
         c.drawText(if (g.count == 0) "0" else g.count.toString(), w / 2f, top + dp(38f), text)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(10f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("счёт вслух", w / 2f, top + dp(50f), text)
         // Счёт за ход показываем на той же стороне, с ходившей стороны стола.
         val aiSide = g.pegSeat == Seat.AI
@@ -268,7 +294,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             }
         } else if (!flying) {
             text.textSize = dp(12f)
-            text.color = Theme.DIM
+            text.color = pal.dim
             c.drawText("карты на столе", w / 2f, seqTop + dp(22f), text)
         }
         rows.fly?.let { fx ->
@@ -278,7 +304,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val annTop = handY - dp(40f)
         drawCrib(c, g, w, annTop - dp(44f))
 
-        fill.color = Theme.PANEL
+        fill.color = pal.panel
         rect.set(pad, annTop, w - pad, annTop + dp(32f))
         c.drawRoundRect(rect, dp(8f), dp(8f), fill)
         text.typeface = Typeface.DEFAULT_BOLD
@@ -314,7 +340,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
      */
     private fun animate(g: Game, opp: FloatArray, seq: FloatArray, hand: FloatArray): Rows {
         val sig = g.sequence.joinToString(",") { it.id.toString() }
-        val grew = sig.isNotEmpty() && (seqSig.isEmpty() || sig.startsWith("$seqSig,"))
+        val grew = flyMs > 0f && sig.isNotEmpty() && (seqSig.isEmpty() || sig.startsWith("$seqSig,"))
         if (grew) {
             val card = g.sequence.last()
             val byAi = g.lastPegSeat == Seat.AI
@@ -336,7 +362,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         prevHand = hand; prevHandCards = g.playerLeft.toList()
 
         val f = flight ?: return Rows(opp, seq, hand, null, false)
-        val t = ((System.currentTimeMillis() - f.startAt) / FLY_MS).coerceIn(0f, 1f)
+        val t = ((System.currentTimeMillis() - f.startAt) / flyMs).coerceIn(0f, 1f)
         if (t >= 1f) {
             flight = null
             return Rows(opp, seq, hand, null, false)
@@ -373,7 +399,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
         text.typeface = Typeface.DEFAULT_BOLD
         text.textSize = dp(15f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText(step.title, w / 2f, top + dp(12f), text)
 
         // Рука показана компактно: главное место на экране отдано комбинациям.
@@ -386,7 +412,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         drawCard(c, w / 2f - stSize, stSize, starterY, starter, true, false, true)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(10f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("стартовая", w / 2f, starterY + stSize * 1.4f + dp(10f), text)
 
         val combos = Scoring.combos(step.cards, starter, step.isCrib)
@@ -425,14 +451,14 @@ class GameView(context: Context, private val host: Host) : View(context) {
         if (shown == 0) {
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(12f)
-            text.color = Theme.DIM
+            text.color = pal.dim
             c.drawText("ничего не засчитано", x0 + width / 2f, y0 + dp(16f), text)
             return y0 + rowH
         }
         if (shown < combos.size) {
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(11f)
-            text.color = Theme.DIM
+            text.color = pal.dim
             c.drawText("и ещё ${combos.size - shown}", x0 + width / 2f, y + rowH - dp(6f), text)
         }
         return y + rowH
@@ -477,7 +503,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c: Canvas, x0: Float, y0: Float, width: Float, b: Breakdown, bonus: String
     ) {
         val panelH = dp(if (bonus.isEmpty()) 50f else 64f)
-        fill.color = Theme.PANEL
+        fill.color = pal.panel
         rect.set(x0, y0, x0 + width, y0 + panelH)
         c.drawRoundRect(rect, dp(12f), dp(12f), fill)
 
@@ -489,7 +515,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         if (bonus.isNotEmpty()) {
             text.typeface = Typeface.DEFAULT
             text.textSize = dp(10f)
-            text.color = Theme.GREEN
+            text.color = pal.player
             c.drawText(bonus, x0 + dp(16f), y0 + dp(48f), text)
         }
 
@@ -510,7 +536,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c.drawText(g.winner, w / 2f, h * 0.36f, text)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(15f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("Вы ${g.playerScore} : ${g.aiScore} компьютер", w / 2f, h * 0.36f + dp(30f), text)
         button(c, w / 2f - dp(80f), h * 0.36f + dp(58f), dp(160f), dp(48f), "В меню", true, A_MENU, -1)
     }
@@ -518,11 +544,11 @@ class GameView(context: Context, private val host: Host) : View(context) {
     // ---------------------------------------------------------------- общие элементы
 
     private fun drawOpponent(c: Canvas, w: Float, xs: FloatArray) {
-        fill.color = Theme.PANEL
+        fill.color = pal.panel
         c.drawRect(0f, dp(TOP_BAR), w, dp(TOP_BAR) + dp(88f), fill)
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(12f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         c.drawText("Компьютер", w / 2f, dp(TOP_BAR) + dp(18f), text)
         var i = 0
         while (i < xs.size / 3) {
@@ -597,7 +623,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(10f)
-        text.color = Theme.DIM
+        text.color = pal.dim
         if (n > 0) {
             text.textAlign = Paint.Align.LEFT
             c.drawText(cribOwner(g), left, y - dp(5f), text)
@@ -615,15 +641,15 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c: Canvas, x: Float, y: Float, w: Float, h: Float,
         label: String, enabled: Boolean, action: Int, index: Int
     ) {
-        fill.color = if (enabled) Theme.GREEN_D else Theme.PANEL
+        fill.color = if (enabled) pal.playerD else pal.panel
         rect.set(x, y, x + w, y + h)
         c.drawRoundRect(rect, dp(12f), dp(12f), fill)
         stroke.strokeWidth = dp(1.4f)
-        stroke.color = if (enabled) Theme.GREEN else Theme.LINE
+        stroke.color = if (enabled) pal.player else pal.line
         c.drawRoundRect(rect, dp(12f), dp(12f), stroke)
         text.typeface = Typeface.DEFAULT_BOLD
         text.textSize = dp(15f)
-        text.color = if (enabled) Theme.TEXT else Theme.DIM
+        text.color = if (enabled) Theme.TEXT else pal.dim
         c.drawText(label, x + w / 2f, y + h / 2f + dp(5f), text)
         if (enabled) hits.add(Hit(RectF(x, y, x + w, y + h), action, index))
     }
@@ -656,13 +682,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val h = cardH(w)
         val r = dp(5f)
         if (card == null || !faceUp) {
-            fill.color = Theme.BACK
-            rect.set(x, top, x + w, top + h)
-            c.drawRoundRect(rect, r, r, fill)
-            fill.color = Theme.BACK_D
-            val inset = min(w, h) * 0.16f
-            rect.set(x + inset, top + inset, x + w - inset, top + h - inset)
-            c.drawRoundRect(rect, r * 0.7f, r * 0.7f, fill)
+            drawBack(c, x, w, top, h, r)
         } else {
             fill.color = Theme.FACE
             rect.set(x, top, x + w, top + h)
@@ -683,7 +703,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             }
         }
         if (highlight) {
-            stroke.color = Theme.GREEN
+            stroke.color = pal.player
             stroke.strokeWidth = dp(2.4f)
             rect.set(x - dp(2f), top - dp(2f), x + w + dp(2f), top + h + dp(2f))
             c.drawRoundRect(rect, r, r, stroke)
@@ -693,6 +713,54 @@ class GameView(context: Context, private val host: Host) : View(context) {
             stroke.strokeWidth = dp(2.4f)
             rect.set(x - dp(2f), top - dp(2f), x + w + dp(2f), top + h + dp(2f))
             c.drawRoundRect(rect, r, r, stroke)
+        }
+    }
+
+    /**
+     * Рубашка. Синий фон общий для всех вариантов, различается только узор —
+     * иначе пришлось бы заводить ещё и палитру рубашек.
+     */
+    private fun drawBack(c: Canvas, x: Float, w: Float, top: Float, h: Float, r: Float) {
+        val cx = x + w / 2f
+        val cy = top + h / 2f
+        val pad = min(w, h) * 0.16f
+        val d = min(w, h) * 0.5f - pad
+        val ix0 = x + pad
+        val ix1 = x + w - pad
+        val iy0 = top + pad
+        val iy1 = top + h - pad
+        fill.color = Theme.BACK
+        rect.set(x, top, x + w, top + h)
+        c.drawRoundRect(rect, r, r, fill)
+        fill.color = Theme.BACK_D
+        when (backStyle) {
+            BackStyle.PLAIN -> {
+                rect.set(ix0, iy0, ix1, iy1)
+                c.drawRoundRect(rect, r * 0.7f, r * 0.7f, fill)
+            }
+            BackStyle.DIAMOND -> {
+                c.save()
+                c.rotate(45f, cx, cy)
+                rect.set(cx - d, cy - d, cx + d, cy + d)
+                c.drawRect(rect, fill)
+                c.restore()
+            }
+            BackStyle.LATTICE -> {
+                stroke.color = Theme.BACK_D
+                stroke.strokeWidth = max(dp(1f), w * 0.07f)
+                val iw = ix1 - ix0
+                for (k in 0..2) {
+                    val a = iw * (k / 3f)
+                    val b = iw * ((k + 1) / 3f)
+                    c.drawLine(ix0 + a, iy0, ix0 + b, iy1, stroke)
+                    c.drawLine(ix0 + a, iy1, ix0 + b, iy0, stroke)
+                }
+            }
+            BackStyle.RING -> {
+                c.drawCircle(cx, cy, d, fill)
+                fill.color = Theme.BACK
+                c.drawCircle(cx, cy, d * 0.45f, fill)
+            }
         }
     }
 

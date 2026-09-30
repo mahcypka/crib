@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- #14532D — тот же зелёный, что у Theme.BG, иначе при запуске мелькает чёрное. -->
+    <!--
+        Фон окна задан здесь только как запасной вариант на самый холодный старт,
+        до чтения сохранения. Дальше цвет подставляется в коде из правил партии:
+        MainActivity.applySystemColors ставит window.setBackgroundDrawable и цвета
+        системных панелей, а Theme.palette(TableStyle) держит тот же набор для Canvas.
+        Менять эти два места по отдельности нельзя — разъедутся.
+    -->
     <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">#FF14532D</item>
         <item name="android:colorBackground">#FF14532D</item>

@@ -70,6 +70,9 @@ object SaveStore {
         put("zeroPenalty", r.zeroPenalty)
         put("bonus29", r.bonus29)
         put("difficulty", r.difficulty.name)
+        put("flyMs", r.flyMs)
+        put("back", r.back.name)
+        put("table", r.table.name)
     }
 
     private fun decodeRules(o: JSONObject) = Rules.decode(
@@ -78,7 +81,10 @@ object SaveStore {
         o.optBoolean("lowball", false),
         o.optBoolean("zeroPenalty", false),
         o.optInt("bonus29", 2),
-        o.optString("difficulty")
+        o.optString("difficulty"),
+        o.optInt("flyMs", 600),
+        o.optString("back"),
+        o.optString("table")
     )
 
     // ---------------------------------------------------------------- партия
