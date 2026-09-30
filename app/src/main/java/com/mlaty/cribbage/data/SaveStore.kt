@@ -5,6 +5,7 @@ import com.mlaty.cribbage.game.Game
 import com.mlaty.cribbage.game.Phase
 import com.mlaty.cribbage.game.Seat
 import com.mlaty.cribbage.model.Card
+import com.mlaty.cribbage.model.FlySpeed
 import com.mlaty.cribbage.model.Rules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -82,7 +83,7 @@ object SaveStore {
         o.optBoolean("zeroPenalty", false),
         o.optInt("bonus29", 2),
         o.optString("difficulty"),
-        o.optInt("flyMs", 600),
+        o.optInt("flyMs", FlySpeed.NORMAL),
         o.optString("back"),
         o.optString("table")
     )

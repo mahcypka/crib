@@ -724,7 +724,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         val cx = x + w / 2f
         val cy = top + h / 2f
         val pad = min(w, h) * 0.16f
-        val d = min(w, h) * 0.5f - pad
+        val rd = min(w, h) * 0.5f - pad
         val ix0 = x + pad
         val ix1 = x + w - pad
         val iy0 = top + pad
@@ -741,7 +741,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             BackStyle.DIAMOND -> {
                 c.save()
                 c.rotate(45f, cx, cy)
-                rect.set(cx - d, cy - d, cx + d, cy + d)
+                rect.set(cx - rd, cy - rd, cx + rd, cy + rd)
                 c.drawRect(rect, fill)
                 c.restore()
             }
@@ -757,9 +757,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
                 }
             }
             BackStyle.RING -> {
-                c.drawCircle(cx, cy, d, fill)
+                c.drawCircle(cx, cy, rd, fill)
                 fill.color = Theme.BACK
-                c.drawCircle(cx, cy, d * 0.45f, fill)
+                c.drawCircle(cx, cy, rd * 0.45f, fill)
             }
         }
     }
