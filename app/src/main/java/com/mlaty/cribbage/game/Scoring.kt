@@ -169,13 +169,16 @@ object Scoring {
         return pts
     }
 
-    /** Рука игрока: четыре карты плюс стартовая. */
+    /**
+     * Рука игрока: четыре карты плюс стартовая. Считаются все категории сразу —
+     * пятнашки, пары, серии, флеш и нобс. Взаимная исключаемость серии и пары
+     * действует только при розыгрыше, здесь они не мешают друг другу.
+     */
     fun hand(handCards: List<Card>, starter: Card): Breakdown {
         val all = handCards + starter
         val suits = HashSet<Int>(4)
         for (c in handCards) suits.add(c.suit)
-        var flush = 0
-        if (suits.size == 1) flush = if (starter.suit in suits) 5 else 4
+        val flush = if (suits.size == 1) (if (starter.suit in suits) 5 else 4) else 0
         val nobs = if (handCards.any { it.rank == 11 && it.suit == starter.suit }) 1 else 0
         return Breakdown(fifteens(all), pairs(all), runs(all), flush, nobs)
     }
@@ -188,32 +191,47 @@ object Scoring {
     }
 
     /**
-     * Серия во время розыгрыша. Считаются карты, сыгранные с последнего сброса счёта,
-     * в том порядке, в каком они легли на стол. Пара обрывает серию, поэтому в раскладе
-     * 2-3-3-4 засчитывается только пара, а не серия из трёх, но 3-3-4-5 серию даёт:
-     * карты после пары собирают её заново.
+     * Серия во время розыгрыша. Считаются карты, сыгранные с последнего сброса счёта;
+     * порядок их хода значения не имеет, серия считается по номиналам. Серия и пара
+     * на одной карте не засчитываются одновременно: нашлась серия — пара не считается.
      */
     fun pegRun(cardsSinceReset: List<Card>): Int {
-        if (cardsSinceReset.isEmpty()) return 0
-        // Пара обрывает серию в любом месте, а не только когда карты стоят вплотную:
-        // повторившийся номинал начинает серию заново. Поэтому 3-3-4-5 даёт серию
-        // из трёх, а 3-4-5-4 — только пару: последняя карта разорвала серию.
-        val run = ArrayList<Int>(8)
-        for (c in cardsSinceReset) {
-            if (run.contains(c.rank)) run.clear()
-            run.add(c.rank)
+        // Серия всегда заканчивается последней сыгранной картой. Берём последние
+        // три карты, сортируем по возрастанию; если соседние номиналы идут подряд —
+        // это серия длиной 3. Пробуем так же 4, 5 и дальше, пока серия получается
+        // и хватает карт. Порядок хода не важен: 6-7-5 это та же серия, что 5-6-7.
+        val n = cardsSinceReset.size
+        var len = 0
+        for (k in 3..n) {
+            val ranks = cardsSinceReset.subList(n - k, n).map { it.rank }.sorted()
+            var consecutive = true
+            for (i in 1 until ranks.size) {
+                if (ranks[i] != ranks[i - 1] + 1) { consecutive = false; break }
+            }
+            if (!consecutive) break
+            len = k
         }
-        var len = 1
-        while (len < run.size && run[run.size - 1 - len] == run[run.size - len] - 1) len++
-        return if (len >= 3) len else 0
+        return len
     }
 
-    /** Очки за повтор ранга во время розыгрыша: вторая карта 2, третья 6, четвёртая 12. */
+    /**
+     * Очки за повтор номинала во время розыгрыша. Считаются только карты, стоящие
+     * подряд в конце последовательности: берём последнюю и идём назад, пока номинал
+     * совпадает. Первая же карта с другим номиналом останавливает отсчёт, поэтому в
+     * раскладе 2-3-4-3 на четвёртом ходу двойки нет: между тройками стоит четвёрка.
+     * Две карты — 2 очка, три — 6, четыре — 12. Больше четырёх не бывает: столько
+     * карт одного номинала в колоде всего четыре.
+     */
     fun pegPair(cardsSinceReset: List<Card>): Int {
-        if (cardsSinceReset.isEmpty()) return 0
-        val last = cardsSinceReset[cardsSinceReset.size - 1]
-        var same = 0
-        for (c in cardsSinceReset) if (c.rank == last.rank) same++
-        return when (same) { 2 -> 2; 3 -> 6; 4 -> 12; else -> 0 }
+        val n = cardsSinceReset.size
+        if (n < 2) return 0
+        val last = cardsSinceReset[n - 1].rank
+        var same = 1
+        var i = n - 2
+        while (i >= 0 && same < 4 && cardsSinceReset[i].rank == last) {
+            same++
+            i--
+        }
+        return when (same) { 2 -> 2; 3 -> 6; else -> 12 }
     }
 }

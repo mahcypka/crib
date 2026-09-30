@@ -207,13 +207,14 @@ class Game(val rules: Rules, val seed: Long) {
         val parts = ArrayList<String>(3)
         var pts = 0
         if (count == 15) { pts += 2; parts += "15 — 2" }
-        val pair = Scoring.pegPair(sequence)
+        // Серия и пара на одной карте вместе не засчитываются: нашлась серия — пара не считается.
+        val run = Scoring.pegRun(sequence)
+        val pair = if (run > 0) 0 else Scoring.pegPair(sequence)
+        if (run > 0) { pts += run; parts += "серия $run — $run" }
         if (pair > 0) {
             pts += pair
             parts += when (pair) { 2 -> "пара — 2"; 6 -> "тройка — 6"; else -> "четвёрка — 12" }
         }
-        val run = Scoring.pegRun(sequence)
-        if (run > 0) { pts += run; parts += "серия $run — $run" }
 
         addScore(seat, pts)
         roundPoints(seat, pts)
