@@ -29,6 +29,7 @@ import kotlin.math.min
 class GameView(context: Context, private val host: Host) : View(context) {
 
     interface Host {
+        fun onDealPick(cardId: Int)
         fun onConfirmDiscard(indices: List<Int>)
         fun onPlayCard(index: Int)
         fun onSayGo()
@@ -59,6 +60,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         const val A_CONFIRM = 5
         const val A_MENU = 6
         const val A_NEWGAME = 7
+        const val A_DEAL = 8
         const val TOP_BAR = 54f
         const val PEG_FADE = 1400f
     }
@@ -143,6 +145,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         if (g.phase != Phase.PLAY) { flight = null; seqSig = "" }
         when (g.phase) {
             Phase.OVER -> drawGameOver(c, g, w, h)
+            Phase.DEAL -> drawDeal(c, g, w, h, pad)
             Phase.DISCARD -> drawDiscard(c, g, w, h, pad)
             Phase.PLAY -> drawPlay(c, g, w, h, pad)
             Phase.SHOW -> drawShow(c, g, w, h, pad)
@@ -178,11 +181,14 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c.drawText("КОМПЬЮТЕР", w - dp(36f), dp(37f), text)
 
         // Метка сдающего: к crib достаётся именно ему, а он меняется каждый раунд.
-        text.textSize = dp(9f)
-        text.color = Theme.GOLD
-        val dealerTag = if (g.aiIsDealer) "ВЫ СДАЁТЕ" else "СДАЁТ"
-        val tagX = if (g.aiIsDealer) dp(46f) else w - dp(42f)
-        c.drawText(dealerTag, tagX, dp(50f), text)
+        // Пока идёт розыгрыш первого раунда, сдающего ещё нет — метка была бы враньём.
+        if (g.phase != Phase.DEAL) {
+            text.textSize = dp(9f)
+            text.color = Theme.GOLD
+            val dealerTag = if (g.aiIsDealer) "ВЫ СДАЁТЕ" else "СДАЁТ"
+            val tagX = if (g.aiIsDealer) dp(46f) else w - dp(42f)
+            c.drawText(dealerTag, tagX, dp(50f), text)
+        }
 
         text.textSize = dp(12f)
         c.drawText("раунд ${g.round}", w / 2f, dp(22f), text)
@@ -199,6 +205,87 @@ class GameView(context: Context, private val host: Host) : View(context) {
         fill.color = pal.player
         rect.set(left, top, left + barW * frac, top + dp(4f))
         c.drawRoundRect(rect, dp(2f), dp(2f), fill)
+    }
+
+    // ---------------------------------------------------------------- розыгрыш первого раунда
+
+    /**
+     * Кто сдаёт в первом раунде, решает игрок: он выбирает карту из колоды сам,
+     * компьютер берёт свою из остатка, и кто вытянул меньший номинал — получает
+     * первый к crib. Сами вытянутые карты показываются крупно, а объявление о том,
+     * кому к crib, живёт в строке g.announce — её потом видит и экран отбросов.
+     */
+    private fun drawDeal(c: Canvas, g: Game, w: Float, h: Float, pad: Float) {
+        val picked = g.dealPick != null
+        text.textAlign = Paint.Align.CENTER
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(16f)
+        text.color = Theme.TEXT
+        c.drawText(
+            if (picked) "Кто вытянул меньше" else "Вытяните карту из колоды",
+            w / 2f, dp(TOP_BAR) + dp(34f), text
+        )
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(12f)
+        text.color = pal.dim
+        c.drawText(
+            if (picked) "Меньший номинал получает первый к crib"
+            else "У кого номинал ниже, тот сдаёт и получает первый к crib",
+            w / 2f, dp(TOP_BAR) + dp(56f), text
+        )
+        if (picked) drawDealt(c, g, w, pad) else drawDeck(c, g, w, pad)
+    }
+
+    /**
+     * Колода разложена по мастям, четырьмя рядами по тринадцать карт. В один ряд
+     * на таком экране поместилось бы пять карт по шесть с половиной dp шириной —
+     * тапнуть в нужную было бы невозможно, а весь розыгрыш держится на одном тапе.
+     */
+    private fun drawDeck(c: Canvas, g: Game, w: Float, pad: Float) {
+        val cards = g.deck.sortedWith(compareBy({ it.suit }, { it.rank }))
+        val gap = dp(1.5f)
+        val rowGap = dp(6f)
+        val cellW = (w - pad * 2 - gap * 12) / 13f
+        val ch = cardH(cellW)
+        val top = dp(TOP_BAR) + dp(84f)
+        for (i in cards.indices) {
+            val x = pad + (i % 13) * (cellW + gap)
+            val y = top + (i / 13) * (ch + rowGap)
+            drawCard(c, x, cellW, y, cards[i], true, false, true)
+            hits.add(Hit(RectF(x, y, x + cellW, y + ch), A_DEAL, cards[i].id))
+        }
+    }
+
+    /** Две вытянутые карты рядом; та вытянула меньше, та обведена золотом. */
+    private fun drawDealt(c: Canvas, g: Game, w: Float, pad: Float) {
+        val p = g.dealPick
+        val r = g.dealRival
+        // При равных номиналах к crib остаётся у игрока, поэтому золотой не получает никто.
+        val pA = if (p != null && r != null && p.rank < r.rank) Theme.GOLD else 0
+        val rA = if (p != null && r != null && r.rank < p.rank) Theme.GOLD else 0
+        val cw = dp(64f)
+        val ch = cardH(cw)
+        val gap = dp(30f)
+        val top = dp(TOP_BAR) + dp(92f)
+        val x0 = w / 2f - cw - gap / 2f
+        val x1 = w / 2f + gap / 2f
+        if (p != null) drawCard(c, x0, cw, top, p, true, false, true, pA)
+        if (r != null) drawCard(c, x1, cw, top, r, true, false, true, rA)
+
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(11f)
+        text.color = pal.dim
+        c.drawText("вы вытянули", x0 + cw / 2f, top - dp(8f), text)
+        c.drawText("компьютер вытянул", x1 + cw / 2f, top - dp(8f), text)
+
+        val ay = top + ch + dp(18f)
+        fill.color = pal.panel
+        rect.set(pad, ay, w - pad, ay + dp(40f))
+        c.drawRoundRect(rect, dp(8f), dp(8f), fill)
+        text.typeface = Typeface.DEFAULT_BOLD
+        text.textSize = dp(12f)
+        text.color = Theme.TEXT
+        c.drawText(g.announce, w / 2f, ay + dp(25f), text)
     }
 
     // ---------------------------------------------------------------- отброс в к crib
@@ -797,6 +884,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
             val hit = hits[i]
             if (!hit.r.contains(event.x, event.y)) continue
             when (hit.action) {
+                A_DEAL -> host.onDealPick(hit.index)
                 A_SELECT -> toggleSelect(hit.index, g)
                 A_PLAY -> host.onPlayCard(hit.index)
                 A_GO -> host.onSayGo()

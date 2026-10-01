@@ -97,6 +97,12 @@ object SaveStore {
 
     private fun decodeCards(a: JSONArray) = (0 until a.length()).map { Card.fromId(a.getInt(it)) }
 
+    private fun encodeText(list: List<String>) = JSONArray().apply { for (s in list) put(s) }
+
+    /** Старые сохранения журнала не знают — пустой список вместо падения. */
+    private fun decodeText(a: JSONArray?) =
+        if (a == null) emptyList() else (0 until a.length()).map { a.getString(it) }
+
     private fun encodeGame(game: Game): JSONObject {
         val s = game.snapshot()
         return JSONObject().apply {
@@ -135,6 +141,9 @@ object SaveStore {
             put("newCountWaiting", s.newCountWaiting)
             put("passWaiting", s.passWaiting)
             put("passSeat", if (s.passSeat == null) JSONObject.NULL else s.passSeat!!.name)
+            put("dealPick", if (s.dealPick == null) JSONObject.NULL else s.dealPick!!.id)
+            put("dealRival", if (s.dealRival == null) JSONObject.NULL else s.dealRival!!.id)
+            put("journal", encodeText(s.journal))
         }
     }
 
@@ -145,6 +154,10 @@ object SaveStore {
         val pg = o.opt("pendingGoSeat")
         val th = o.opt("targetHitBy")
         val ps = o.opt("passSeat")
+        val dPick = o.opt("dealPick")
+        val dRival = o.opt("dealRival")
+        fun card(v: Any?): Card? =
+            if (v == null || v == JSONObject.NULL) null else Card.fromId(v as Int)
         return Game.restore(
             rules,
             o.optLong("seed"),
@@ -182,7 +195,10 @@ object SaveStore {
                 o.optBoolean("playOver"),
                 o.optBoolean("newCountWaiting"),
                 o.optBoolean("passWaiting"),
-                if (ps == null || ps == JSONObject.NULL) null else Seat.valueOf(ps as String)
+                if (ps == null || ps == JSONObject.NULL) null else Seat.valueOf(ps as String),
+                card(dPick),
+                card(dRival),
+                decodeText(o.optJSONArray("journal"))
             )
         )
     }

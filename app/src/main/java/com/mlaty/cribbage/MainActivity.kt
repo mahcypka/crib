@@ -1,6 +1,9 @@
 package com.mlaty.cribbage
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -87,6 +90,7 @@ class MainActivity : Activity(), GameView.Host {
         scheduleShow()
         scheduleCount()
         schedulePass()
+        scheduleDeal()
     }
 
     override fun onPause() {
@@ -95,6 +99,7 @@ class MainActivity : Activity(), GameView.Host {
         handler.removeCallbacks(showDelay)
         handler.removeCallbacks(countDelay)
         handler.removeCallbacks(passDelay)
+        handler.removeCallbacks(dealDelay)
         // В меню активной партии нет, но сохранённая ещё должна пережить уход из приложения.
         SaveStore.save(this, rules, live(game ?: savedGame))
     }
@@ -136,6 +141,24 @@ class MainActivity : Activity(), GameView.Host {
         (g.phase == Phase.DISCARD && g.aiDiscardsLeft > 0) ||
             (g.phase == Phase.PLAY && g.turn == Seat.AI && !g.playOver &&
                 !g.newCountWaiting && !g.passWaiting)
+
+    /**
+     * Пауза на показанных вытянутых картах: игрок должен успеть разглядеть обе
+     * и объявление о том, кому достался первый к crib, — только потом раздаётся рука.
+     * Длительность берётся из настроек, как перед показом.
+     */
+    private fun scheduleDeal() {
+        handler.removeCallbacks(dealDelay)
+        val g = game ?: return
+        if (g.phase != Phase.DEAL || g.dealPick == null) return
+        handler.postDelayed(dealDelay, maxOf(rules.showPauseMs, rules.flyMs).toLong())
+    }
+
+    private val dealDelay = Runnable {
+        val g = game ?: return@Runnable
+        g.enterHand()
+        refresh()
+    }
 
     /**
      * Пауза перед автоматическим «го». Своя, а не showPauseMs: та настройка отвечает
@@ -204,6 +227,12 @@ class MainActivity : Activity(), GameView.Host {
 
     // ---------------------------------------------------------------- действия игрока
 
+    override fun onDealPick(cardId: Int) {
+        val g = game ?: return
+        g.playerDealPick(cardId)
+        refresh()
+    }
+
     override fun onConfirmDiscard(indices: List<Int>) {
         val g = game ?: return
         if (indices.size != g.playerDiscardsLeft) {
@@ -240,6 +269,7 @@ class MainActivity : Activity(), GameView.Host {
         handler.removeCallbacks(showDelay)
         handler.removeCallbacks(countDelay)
         handler.removeCallbacks(passDelay)
+        handler.removeCallbacks(dealDelay)
         startGame(Game(rules, System.nanoTime()))
     }
 
@@ -263,6 +293,7 @@ class MainActivity : Activity(), GameView.Host {
         scheduleShow()
         scheduleCount()
         schedulePass()
+        scheduleDeal()
     }
 
     private fun showMenu() {
@@ -270,12 +301,15 @@ class MainActivity : Activity(), GameView.Host {
         handler.removeCallbacks(showDelay)
         handler.removeCallbacks(countDelay)
         handler.removeCallbacks(passDelay)
+        handler.removeCallbacks(dealDelay)
         // Текущая партия и есть та, которую предложит «Продолжить»: нельзя
         // подменять её старой сохранённой и затирать свежий прогресс.
-        val keep = live(game ?: savedGame)
+        // live() здесь не применяется намеренно: журнал нужен и доигранной партии —
+        // как раз на её счёт и жалуются, — а в файл она по-прежнему не пишется.
+        val keep = game ?: savedGame
         game = null
         savedGame = keep
-        SaveStore.save(this, rules, keep)
+        SaveStore.save(this, rules, live(keep))
         applySystemColors()
         root.setBackgroundColor(pal.bg)
         root.removeAllViews()
@@ -380,7 +414,8 @@ class MainActivity : Activity(), GameView.Host {
         })
 
         col.addView(space(26))
-        val resume = savedGame
+        // Доигранную партию продолжать нельзя, но журнал у неё остаётся — см. showJournal.
+        val resume = savedGame?.takeIf { it.phase != Phase.OVER }
         if (resume != null) {
             col.addView(button("Продолжить партию", true) { startGame(resume) })
             col.addView(space(10))
@@ -392,7 +427,62 @@ class MainActivity : Activity(), GameView.Host {
         col.addView(button("Как играть", false) { showHelp() })
         col.addView(space(20))
         col.addView(label("Партия сохраняется после каждого хода и не пропадёт, если Android выгрузит приложение из памяти.", 11f, pal.dim))
+        // Журнал — в самом низу меню: он нужен редко и только когда партия уже испорчена.
+        col.addView(space(10))
+        col.addView(button("Журнал партии", false) { showJournal() })
         return scroll
+    }
+
+    /**
+     * Журнал партии: построчный, с номером операции, ходами и разбором подсчётов.
+     * За него предъявляют претензии к интерфейсу и к счёту, поэтому он копируется
+     * одним нажатием целиком — выделять строки вручную не нужно.
+     */
+    private fun showJournal() {
+        val lines = savedGame?.journal ?: emptyList()
+        root.removeAllViews()
+        val scroll = ScrollView(this)
+        scroll.setBackgroundColor(pal.bg)
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(20), dp(26), dp(20), dp(28))
+        scroll.addView(col)
+        col.addView(label("Журнал партии", 24f, Theme.TEXT, true))
+        col.addView(space(8))
+        col.addView(label(
+            if (lines.isEmpty())
+                "Журнала пока нет: начните партию — здесь появятся все ходы и подсчёты."
+            else
+                "Три цифры в начале строки — номер операции. Скопируйте текст и пришлите его" +
+                    " вместе с претензией к интерфейсу или подсчёту.",
+            12f, pal.dim))
+        if (lines.isNotEmpty()) {
+            col.addView(space(12))
+            col.addView(TextView(this).apply {
+                typeface = android.graphics.Typeface.MONOSPACE
+                setTextColor(Theme.TEXT)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                text = lines.joinToString("\n")
+            })
+            col.addView(space(16))
+            val status = label("", 12f, pal.player)
+            col.addView(status)
+            col.addView(space(6))
+            col.addView(button("Скопировать в буфер", true) {
+                if (copyJournal()) status.text = "Скопировано — можно вставлять в сообщение."
+            })
+            col.addView(space(12))
+        }
+        col.addView(button("Назад", true) { showMenu() })
+        root.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    private fun copyJournal(): Boolean {
+        val body = savedGame?.journal?.joinToString("\n").orEmpty()
+        if (body.isEmpty()) return false
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Журнал партии", body))
+        return true
     }
 
     private fun showHelp() {

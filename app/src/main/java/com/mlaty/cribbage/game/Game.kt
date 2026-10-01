@@ -5,7 +5,7 @@ import com.mlaty.cribbage.model.Rules
 import com.mlaty.cribbage.model.WinMode
 import kotlin.random.Random
 
-enum class Phase { DISCARD, PLAY, SHOW, OVER }
+enum class Phase { DEAL, DISCARD, PLAY, SHOW, OVER }
 enum class Seat { PLAYER, AI }
 
 /** Что раскрыто на текущем шаге розыгрыша. */
@@ -91,6 +91,26 @@ class Game(val rules: Rules, val seed: Long) {
     var passSeat: Seat? = null; private set
 
     /**
+     * Карты, вытянутые при розыгрыше в первом раунде: [dealPick] выбрал игрок,
+     * [dealRival] компьютер взял из остатка колоды. Дальше розыгрыш не повторяют —
+     * сдающий просто переходит на другую сторону. Живут в сохранении, чтобы партия,
+     * пойманная посреди показа вытянутых карт, продолжилась с того же места.
+     */
+    var dealPick: Card? = null; private set
+    var dealRival: Card? = null; private set
+
+    /**
+     * Построчный журнал партии: у каждой строки свой номер операции, и в строке
+     * ровно то, что было на экране в этот момент — карты, счёт, очки и разбор
+     * подсчёта. Только растёт, ничего не переписывает, поэтому номера остаются
+     * верными и после восстановления из сохранения. Живёт в сохранении: журнал,
+     * который обрывается на выгрузке процесса, ни к чему не годится.
+     * Объявлен до init: конструктор зовёт startRound, а тот пишет в журнал.
+     */
+    var journal: MutableList<String> = mutableListOf()
+        private set
+
+    /**
      * Очки за последний сыгранный ход — для всплывающей отметки. Это чисто
      * украшение розыгрыша, поэтому в сохранение не попадает.
      */
@@ -120,33 +140,45 @@ class Game(val rules: Rules, val seed: Long) {
     // ---------------------------------------------------------------- раунд
 
     /**
-     * Кто сдаёт: каждый вытягивает по карте, и чей номинал ниже — тот сдающий,
-     * а значит и первый криб его. Порядок вытягивания задан [rnd], поэтому после
-     * восстановления из сохранения сдающий выходит тот же. При равных номиналах
-     * тянут заново — иначе пришлось бы решать костьми, а это нечестно.
+     * Первая рука партии разыгрывается: игрок выбирает карту из колоды сам,
+     * компьютер берёт свою из остатка. Чей номинал ниже — тот сдаёт и получает
+     * первый к crib. Дальше розыгрыш не повторяют: сдающий просто переходит
+     * на другую сторону, так и на настоящем столе.
      */
-    private fun drawForDealer(): Pair<Seat, String> {
-        val all = Card.deck()
-        var p: Card
-        var a: Card
-        do {
-            p = all.random(rnd())
-            a = all.random(rnd())
-        } while (p.rank == a.rank)
-        val who = if (p.rank < a.rank) "ваш" else "компьютера"
-        val text = "Первый криб $who: ${Card.rankLabel(p.rank)}${Card.suitSymbol(p.suit)}" +
-            " против ${Card.rankLabel(a.rank)}${Card.suitSymbol(a.suit)}"
-        return if (p.rank < a.rank) Seat.PLAYER to text else Seat.AI to text
+    fun playerDealPick(cardId: Int) {
+        if (phase != Phase.DEAL || dealPick != null) return
+        val i = deck.indexOfFirst { it.id == cardId }
+        if (i < 0) return
+        val p = deck.removeAt(i)
+        val a = deck.removeAt(deck.random(rnd()))
+        dealPick = p
+        dealRival = a
+        // При равных номиналах к crib остаётся у игрока: перетягивать карту у него
+        // только что было — спросить ещё раз значило бы отнять у него выбор.
+        val tie = p.rank == a.rank
+        aiIsDealer = p.rank > a.rank
+        announce = when {
+            tie -> "Номиналы равны — первый к crib ваш: ${lab(p)} против ${lab(a)}"
+            aiIsDealer -> "Первый криб у компьютера: ${lab(a)} против ${lab(p)}"
+            else -> "Первый криб ваш: ${lab(p)} против ${lab(a)}"
+        }
+        log("Раунд $round. Розыгрыш: вы вытянули ${lab(p)}, компьютер вытянул ${lab(a)}" +
+            if (tie) ". Номиналы равны — первый к crib ваш"
+            else if (aiIsDealer) ". Ниже компьютера — первый к crib компьютера"
+            else ". Ниже ваша — первый к crib ваш")
     }
 
-    private fun startRound() {
-        val (dealer, dealt) = drawForDealer()
-        aiIsDealer = dealer == Seat.AI
-        deck = Card.deck().toMutableList()
-        deck.shuffle(rnd())
-        playerSix = mutableListOf()
-        aiSix = mutableListOf()
-        crib = mutableListOf()
+    /**
+     * Карты показаны, пауза выдержана — раздаём руку. Длительность паузы задаёт
+     * интерфейс: она нужна, чтобы успеть разглядеть, кому достался первый криб.
+     */
+    fun enterHand() {
+        if (phase != Phase.DEAL || dealPick == null) return
+        dealHands()
+        phase = Phase.DISCARD
+    }
+
+    private fun dealHands() {
         repeat(6) {
             playerSix.add(deck.removeAt(0))
             aiSix.add(deck.removeAt(0))
@@ -154,6 +186,27 @@ class Game(val rules: Rules, val seed: Long) {
         // Рука игрока сразу по номиналу: туз, двойка, ... король. Дальше порядок
         // сохраняется сам — отбросы и сыгранные карты просто удаляются из списка.
         playerSix.sortWith(compareBy({ it.rank }, { it.suit }))
+        // Карты компьютера в журнал не пишем: он их не показывает, и журнал не должен
+        // превращаться в способ подсмотреть чужую руку посреди розыгрыша.
+        log("Раздача раунда $round. Ваши 6 карт: ${cards(playerSix)}. Отбросить 2 в к crib.")
+    }
+
+    private fun lab(c: Card) = Card.rankLabel(c.rank) + Card.suitSymbol(c.suit)
+
+    private fun cards(list: List<Card>) = list.joinToString(" ") { lab(it) }
+
+    private fun log(text: String) {
+        journal.add("%03d  %s".format(journal.size + 1, text))
+    }
+
+    private fun dealerName() = if (aiIsDealer) "компьютер" else "вы"
+
+    private fun startRound() {
+        deck = Card.deck().toMutableList()
+        deck.shuffle(rnd())
+        playerSix = mutableListOf()
+        aiSix = mutableListOf()
+        crib = mutableListOf()
         playerFour = mutableListOf()
         aiFour = mutableListOf()
         playerLeft = mutableListOf()
@@ -178,11 +231,21 @@ class Game(val rules: Rules, val seed: Long) {
         newCountWaiting = false
         passWaiting = false
         passSeat = null
+        dealPick = null
+        dealRival = null
         playerDiscardsLeft = 2
         aiDiscardsLeft = 2
-        // Ставим в самом конце: выше announce ещё обнуляется.
-        announce = dealt
-        phase = Phase.DISCARD
+        if (round == 1) {
+            // Первый раунд розыгрывается игроком: карту для сравнения он выбирает сам.
+            phase = Phase.DEAL
+        } else {
+            // Дальше розыгрыш не повторяют — сдающий просто переходит на другую сторону.
+            aiIsDealer = !aiIsDealer
+            announce = "Сдающий меняется: ${dealerName()}"
+            log("Раунд $round. Сдающий меняется: ${dealerName()}.")
+            dealHands()
+            phase = Phase.DISCARD
+        }
     }
 
     // ---------------------------------------------------------------- отбросы в к crib
@@ -190,17 +253,27 @@ class Game(val rules: Rules, val seed: Long) {
     fun playerDiscard(index: Int) {
         if (phase != Phase.DISCARD || playerDiscardsLeft <= 0) return
         if (index !in playerSix.indices) return
-        crib.add(playerSix.removeAt(index))
+        val c = playerSix.removeAt(index)
+        crib.add(c)
         playerDiscardsLeft--
+        log("Вы сбросили в к crib: ${lab(c)}. Осталось отбросить $playerDiscardsLeft.")
         if (playerDiscardsLeft == 0 && aiDiscardsLeft == 0) beginPlay()
     }
 
     fun aiDiscard() {
         if (phase != Phase.DISCARD || aiDiscardsLeft <= 0) return
         val pick = Ai.chooseDiscards(aiSix, unknownPool(), rules.difficulty, rnd())
+        val before = crib.size
         for (i in pick.sortedDescending()) if (i in aiSix.indices) crib.add(aiSix.removeAt(i))
         aiDiscardsLeft = 0
+        log("Компьютер сбросил в к crib: ${plural(crib.size - before, "карту", "карты", "карт")}.")
         if (playerDiscardsLeft == 0) beginPlay()
+    }
+
+    private fun plural(n: Int, one: String, few: String, many: String) = when {
+        n % 10 == 1 && n % 100 != 11 -> "$n $one"
+        n % 10 in 2..4 && n % 100 !in 12..14 -> "$n $few"
+        else -> "$n $many"
     }
 
     private fun beginPlay() {
@@ -211,6 +284,12 @@ class Game(val rules: Rules, val seed: Long) {
         deck = (deck.subList(half, deck.size) + deck.subList(0, half)).toMutableList()
         val cut = deck.removeAt(0)
         starter = cut
+        // Состав к crib в журнал не пишем: часть карт сбросил компьютер, а лежит к crib
+// рубашкой и открывается только при подсчёте. Пишем, сколько их, — этого достаточно,
+        // чтобы сверить счёт ходов, и не портит игру.
+        log("К crib: ${plural(crib.size, "карта", "карты", "карт")}, откроются при подсчёте. " +
+            "Стартовая карта ${lab(cut)} — открывает ${dealerName()}" +
+            if (cut.rank == 11) ", валет: +2 сдающему" else "")
         if (cut.rank == 11) {
             val seat = if (aiIsDealer) Seat.AI else Seat.PLAYER
             addScore(seat, 2)
@@ -264,6 +343,7 @@ class Game(val rules: Rules, val seed: Long) {
         passes = 0
         lastPlayedBy = seat
         lastPegSeat = seat
+        val before = count
         count += Scoring.value(card.rank)
         sequence.add(card)
 
@@ -289,6 +369,9 @@ class Game(val rules: Rules, val seed: Long) {
             append(count)
             if (parts.isNotEmpty()) append("   ").append(parts.joinToString(", "))
         }
+        val ptsText = if (pts > 0) "+$pts (${parts.joinToString(", ")})" else "+0, ничего не засчитано"
+        log("${name(seat)}: ${lab(card)}. Счёт $before → $count, $ptsText. " +
+            "Стол: ${cards(sequence)}. Всего: вы $playerScore, компьютер $aiScore")
         turn = if (seat == Seat.PLAYER) Seat.AI else Seat.PLAYER
 
         if (count == 31) finishCount(2)
@@ -300,6 +383,8 @@ class Game(val rules: Rules, val seed: Long) {
     private fun pass(seat: Seat) {
         if (lastPlayedBy != null) pendingGoSeat = lastPlayedBy
         passes++
+        log("${name(seat)}: го. Счёт $count, стол: ${cards(sequence)}. " +
+            "Всего: вы $playerScore, компьютер $aiScore")
         turn = if (seat == Seat.PLAYER) Seat.AI else Seat.PLAYER
         if (passes >= 2) {
             finishCount(if (count == 31) 2 else 1)
@@ -341,6 +426,10 @@ class Game(val rules: Rules, val seed: Long) {
             if (seat != null) {
                 addScore(seat, points)
                 roundPoints(seat, points)
+                val closeCard = sequence.lastOrNull()?.let { lab(it) } ?: "—"
+                log((if (count == 31) "Счёт закрыт на 31: " else "Карты кончились, закрывает ") +
+                    "${name(seat)} картой $closeCard, +$points. " +
+                    "Всего: вы $playerScore, компьютер $aiScore")
                 announce = if (count == 31) "31 — $points очка" else "последняя карта — $points очко"
                 pegPoints = points
                 pegLabel = if (count == 31) "31" else "последняя карта"
@@ -412,6 +501,14 @@ class Game(val rules: Rules, val seed: Long) {
     private fun name(seat: Seat) = if (seat == Seat.PLAYER) "Вы" else "Компьютер"
     private fun cardsOf(seat: Seat) = if (seat == Seat.PLAYER) playerFour else aiFour
 
+    private fun kindLabel(k: ComboKind) = when (k) {
+        ComboKind.FIFTEEN -> "15"
+        ComboKind.PAIR -> "пара"
+        ComboKind.RUN -> "серия"
+        ComboKind.FLUSH -> "флеш"
+        ComboKind.NOBS -> "валет"
+    }
+
     fun advanceShow() {
         val step = showStep()
         var pts = step.breakdown.total
@@ -428,6 +525,14 @@ class Game(val rules: Rules, val seed: Long) {
         }
         addScore(seat, pts)
         roundPoints(seat, pts)
+        val shownStarter = starter!!
+        log("Подсчёт. ${step.title}: ${cards(step.cards)} + стартовая ${lab(shownStarter)}")
+        for (cb in Scoring.combos(step.cards, shownStarter, step.isCrib)) {
+            log("   +${cb.points} ${kindLabel(cb.kind)}: ${cards(cb.cards)}")
+        }
+        log("   Итого за шаг $pts (${step.breakdown.summary()})" +
+            (if (bonus.isEmpty()) "" else ", ${bonus.trim()}"))
+        log("Всего: вы $playerScore, компьютер $aiScore")
         lastShowBonus = bonus
         showIndex++
         if (showIndex >= 3) endRound() else checkTarget()
@@ -451,6 +556,7 @@ class Game(val rules: Rules, val seed: Long) {
             hit == Seat.PLAYER -> "Вы победили"
             else -> "Победил компьютер"
         }
+        log("Партия окончена. $winner. Всего: вы $playerScore, компьютер $aiScore")
         return true
     }
 
@@ -463,9 +569,14 @@ class Game(val rules: Rules, val seed: Long) {
                 playerScore < aiScore -> "Сыграно ${rules.target} раундов — победил компьютер"
                 else -> "Сыграно ${rules.target} раундов — ничья"
             }
+            log("Итог раунда $round: вы +$roundPlayerPoints, компьютер +$roundAiPoints. " +
+                "Всего: вы $playerScore, компьютер $aiScore")
+            log("Партия окончена. $winner.")
             return
         }
         round++
+        log("Итог раунда ${round - 1}: вы +$roundPlayerPoints, компьютер +$roundAiPoints. " +
+            "Всего: вы $playerScore, компьютер $aiScore")
         startRound()
     }
 
@@ -533,7 +644,10 @@ class Game(val rules: Rules, val seed: Long) {
         val playOver: Boolean,
         val newCountWaiting: Boolean,
         val passWaiting: Boolean,
-        val passSeat: Seat?
+        val passSeat: Seat?,
+        val dealPick: Card?,
+        val dealRival: Card?,
+        val journal: List<String>
     )
 
     fun snapshot(): State = State(
@@ -546,7 +660,7 @@ class Game(val rules: Rules, val seed: Long) {
         roundPlayerPoints, roundAiPoints,
         lastShowBonus, winner,
         passes, lastPlayedBy, pendingGoSeat, targetHitBy, playOver, newCountWaiting,
-        passWaiting, passSeat
+        passWaiting, passSeat, dealPick, dealRival, journal.toList()
     )
 
     companion object {
@@ -586,6 +700,11 @@ class Game(val rules: Rules, val seed: Long) {
             g.newCountWaiting = s.newCountWaiting
             g.passWaiting = s.passWaiting
             g.passSeat = s.passSeat
+            g.dealPick = s.dealPick
+            g.dealRival = s.dealRival
+            // Журнал переписываем целиком, а не дополняем: конструктор Game выше уже создал
+            // свой пустой список, и дописывать в него — значило бы смешать номера операций.
+            g.journal = s.journal.toMutableList()
             return g
         }
     }
