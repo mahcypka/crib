@@ -131,6 +131,7 @@ object SaveStore {
             put("lastPlayedBy", if (s.lastPlayedBy == null) JSONObject.NULL else s.lastPlayedBy!!.name)
             put("pendingGoSeat", if (s.pendingGoSeat == null) JSONObject.NULL else s.pendingGoSeat!!.name)
             put("targetHitBy", if (s.targetHitBy == null) JSONObject.NULL else s.targetHitBy!!.name)
+            put("playOver", s.playOver)
         }
     }
 
@@ -173,7 +174,8 @@ object SaveStore {
                 o.optInt("passes"),
                 if (lp == null || lp == JSONObject.NULL) null else Seat.valueOf(lp as String),
                 if (pg == null || pg == JSONObject.NULL) null else Seat.valueOf(pg as String),
-                if (th == null || th == JSONObject.NULL) null else Seat.valueOf(th as String)
+                if (th == null || th == JSONObject.NULL) null else Seat.valueOf(th as String),
+                o.optBoolean("playOver")
             )
         )
     }
