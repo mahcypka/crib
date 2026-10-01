@@ -72,6 +72,25 @@ class Game(val rules: Rules, val seed: Long) {
     var playOver = false; private set
 
     /**
+     * Счёт закрыт, но партия продолжается: карты, которыми его закрыли, и сам счёт
+     * остаются на экране, пока интерфейс не досчитает паузу и не вызовет
+     * [enterNextCount]. Без этого стек карт исчезал бы в тот же кадр, когда
+     * прилетает последняя карта, и её нельзя было бы рассмотреть.
+     * Как и [playOver], живёт в сохранении: после перезапуска пауза досчитывается заново.
+     */
+    var newCountWaiting = false; private set
+
+    /**
+     * Ход пропускается сам, потому что карт нет. Паузу перед этим задаёт интерфейс
+     * ([enterPass]): иначе «го» и очки последней карты показывались бы в один кадр
+     * с ходом компьютера, и последние очки раунда не успели бы увидеть.
+     */
+    var passWaiting = false; private set
+
+    /** Чей ход пропускается, пока стоит [passWaiting]. */
+    var passSeat: Seat? = null; private set
+
+    /**
      * Очки за последний сыгранный ход — для всплывающей отметки. Это чисто
      * украшение розыгрыша, поэтому в сохранение не попадает.
      */
@@ -100,8 +119,29 @@ class Game(val rules: Rules, val seed: Long) {
 
     // ---------------------------------------------------------------- раунд
 
+    /**
+     * Кто сдаёт: каждый вытягивает по карте, и чей номинал ниже — тот сдающий,
+     * а значит и первый криб его. Порядок вытягивания задан [rnd], поэтому после
+     * восстановления из сохранения сдающий выходит тот же. При равных номиналах
+     * тянут заново — иначе пришлось бы решать костьми, а это нечестно.
+     */
+    private fun drawForDealer(): Pair<Seat, String> {
+        val all = Card.deck()
+        var p: Card
+        var a: Card
+        do {
+            p = all.random(rnd())
+            a = all.random(rnd())
+        } while (p.rank == a.rank)
+        val who = if (p.rank < a.rank) "ваш" else "компьютера"
+        val text = "Первый криб $who: ${Card.rankLabel(p.rank)}${Card.suitSymbol(p.suit)}" +
+            " против ${Card.rankLabel(a.rank)}${Card.suitSymbol(a.suit)}"
+        return if (p.rank < a.rank) Seat.PLAYER to text else Seat.AI to text
+    }
+
     private fun startRound() {
-        aiIsDealer = round % 2 == 1
+        val (dealer, dealt) = drawForDealer()
+        aiIsDealer = dealer == Seat.AI
         deck = Card.deck().toMutableList()
         deck.shuffle(rnd())
         playerSix = mutableListOf()
@@ -135,8 +175,13 @@ class Game(val rules: Rules, val seed: Long) {
         pegSeat = null
         lastPegSeat = null
         playOver = false
+        newCountWaiting = false
+        passWaiting = false
+        passSeat = null
         playerDiscardsLeft = 2
         aiDiscardsLeft = 2
+        // Ставим в самом конце: выше announce ещё обнуляется.
+        announce = dealt
         phase = Phase.DISCARD
     }
 
@@ -185,25 +230,26 @@ class Game(val rules: Rules, val seed: Long) {
 
     private fun playable(c: Card) = count + Scoring.value(c.rank) <= 31
 
-    fun playerHasMove(): Boolean = phase == Phase.PLAY && playerLeft.any { playable(it) }
+    fun playerHasMove(): Boolean = phase == Phase.PLAY && !newCountWaiting && !passWaiting && playerLeft.any { playable(it) }
 
     fun playerCanPlay(index: Int): Boolean =
-        phase == Phase.PLAY && turn == Seat.PLAYER && index in playerLeft.indices && playable(playerLeft[index])
+        phase == Phase.PLAY && !newCountWaiting && !passWaiting && turn == Seat.PLAYER &&
+            index in playerLeft.indices && playable(playerLeft[index])
 
     fun playerPlay(index: Int) {
-        if (phase != Phase.PLAY || turn != Seat.PLAYER) return
+        if (phase != Phase.PLAY || newCountWaiting || passWaiting || turn != Seat.PLAYER) return
         if (index !in playerLeft.indices || !playable(playerLeft[index])) return
         playCard(Seat.PLAYER, playerLeft.removeAt(index))
     }
 
     fun playerGo() {
-        if (phase != Phase.PLAY || playOver || turn != Seat.PLAYER) return
+        if (phase != Phase.PLAY || playOver || newCountWaiting || passWaiting || turn != Seat.PLAYER) return
         if (playerLeft.any { playable(it) }) return
         pass(Seat.PLAYER)
     }
 
     fun aiAct(): Boolean {
-        if (phase != Phase.PLAY || playOver || turn != Seat.AI) return false
+        if (phase != Phase.PLAY || playOver || newCountWaiting || passWaiting || turn != Seat.AI) return false
         val i = Ai.choosePlay(aiLeft, sequence, count, rules.difficulty, rnd())
         if (i < 0) {
             if (aiLeft.any { playable(it) }) return false
@@ -265,9 +311,28 @@ class Game(val rules: Rules, val seed: Long) {
 
     /** Игрок, у которого не осталось карт, не ходит — его ход пропускается сразу. */
     private fun skipEmptyTurn() {
-        if (phase != Phase.PLAY) return
-        if (turn == Seat.PLAYER && playerLeft.isEmpty()) pass(Seat.PLAYER)
-        if (phase == Phase.PLAY && turn == Seat.AI && aiLeft.isEmpty()) pass(Seat.AI)
+        if (phase != Phase.PLAY || newCountWaiting || passWaiting) return
+        if (turn == Seat.PLAYER && playerLeft.isEmpty()) askPass(Seat.PLAYER)
+        if (phase == Phase.PLAY && !passWaiting && turn == Seat.AI && aiLeft.isEmpty()) askPass(Seat.AI)
+    }
+
+    /**
+     * Автопропуск не отдаёт ход сразу: сначала «го» должно повисеть на экране,
+     * и только потом ход уходит дальше. Длительность паузы задаёт интерфейс.
+     */
+    private fun askPass(seat: Seat) {
+        passSeat = seat
+        passWaiting = true
+        announce = "го"
+    }
+
+    /** Пауза выдержана — ход действительно отдаётся. */
+    fun enterPass() {
+        val seat = passSeat ?: return
+        if (phase != Phase.PLAY || !passWaiting) return
+        passWaiting = false
+        passSeat = null
+        pass(seat)
     }
 
     private fun finishCount(points: Int) {
@@ -283,12 +348,34 @@ class Game(val rules: Rules, val seed: Long) {
                 pegSeq++
             }
         }
+        if (playerLeft.isEmpty() && aiLeft.isEmpty()) {
+            count = 0
+            sequence = mutableListOf()
+            passes = 0
+            pendingGoSeat = null
+            playOver = true
+        } else {
+            // Счёт закрыт, а игра продолжается: счёт и стек карт остаются на экране,
+            // пока интерфейс не вызовет enterNextCount.
+            newCountWaiting = true
+        }
+    }
+
+    /**
+     * Начало нового счёта. Стек карт и сам счёт убираются только здесь — вызвать
+     * раньше нельзя, иначе карта, которой закрыли счёт, пропадёт с экрана.
+     */
+    fun enterNextCount() {
+        if (phase != Phase.PLAY || !newCountWaiting) return
+        newCountWaiting = false
         count = 0
         sequence = mutableListOf()
         passes = 0
         pendingGoSeat = null
         if (lastPlayedBy != null) turn = if (lastPlayedBy == Seat.PLAYER) Seat.AI else Seat.PLAYER
-        if (playerLeft.isEmpty() && aiLeft.isEmpty()) playOver = true
+        // Ход мог достаться тому, у кого карт не осталось: пропускаем сразу,
+        // иначе игрок ждал бы нажатия на GO, которого сделать нечем.
+        skipEmptyTurn()
     }
 
     // ---------------------------------------------------------------- подсчёт очков
@@ -443,7 +530,10 @@ class Game(val rules: Rules, val seed: Long) {
         val lastPlayedBy: Seat?,
         val pendingGoSeat: Seat?,
         val targetHitBy: Seat?,
-        val playOver: Boolean
+        val playOver: Boolean,
+        val newCountWaiting: Boolean,
+        val passWaiting: Boolean,
+        val passSeat: Seat?
     )
 
     fun snapshot(): State = State(
@@ -455,7 +545,8 @@ class Game(val rules: Rules, val seed: Long) {
         sequence.toList(), count, turn, announce, showIndex,
         roundPlayerPoints, roundAiPoints,
         lastShowBonus, winner,
-        passes, lastPlayedBy, pendingGoSeat, targetHitBy, playOver
+        passes, lastPlayedBy, pendingGoSeat, targetHitBy, playOver, newCountWaiting,
+        passWaiting, passSeat
     )
 
     companion object {
@@ -492,6 +583,9 @@ class Game(val rules: Rules, val seed: Long) {
             g.pendingGoSeat = s.pendingGoSeat
             g.targetHitBy = s.targetHitBy
             g.playOver = s.playOver
+            g.newCountWaiting = s.newCountWaiting
+            g.passWaiting = s.passWaiting
+            g.passSeat = s.passSeat
             return g
         }
     }

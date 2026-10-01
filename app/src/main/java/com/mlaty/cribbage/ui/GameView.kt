@@ -234,6 +234,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.textSize = dp(12f)
         text.color = pal.dim
         c.drawText("Ваши карты", w / 2f, handY - dp(8f), text)
+        // Кто вытянул карту ниже — видно сразу, иначе раздающий известен только
+        // по подписи под рядом к crib, а она появляется лишь после первых отбросов.
+        c.drawText(g.announce, w / 2f, handY - dp(26f), text)
         val xs = fitRow(g.playerSix.size, w - pad * 2, dp(56f), dp(5f), w / 2f, handY)
         g.playerSix.forEachIndexed { i, card ->
             val sel = selected.contains(i)
@@ -304,7 +307,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
 
         val annTop = handY - dp(40f)
-        drawCrib(c, g, w, annTop - dp(44f))
+        drawCrib(c, g, w, annTop - dp(5f))
 
         fill.color = pal.panel
         rect.set(pad, annTop, w - pad, annTop + dp(32f))
@@ -315,7 +318,8 @@ class GameView(context: Context, private val host: Host) : View(context) {
         c.drawText(g.announce, w / 2f, annTop + dp(21f), text)
 
         for (i in g.playerLeft.indices) {
-            val can = g.turn == Seat.PLAYER && g.count + Scoring.value(g.playerLeft[i].rank) <= 31
+            val can = g.turn == Seat.PLAYER && !g.newCountWaiting && !g.passWaiting &&
+                g.count + Scoring.value(g.playerLeft[i].rank) <= 31
             val x = rows.hand[i * 3]
             val cw = rows.hand[i * 3 + 1]
             val top2 = rows.hand[i * 3 + 2]
@@ -324,15 +328,21 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
 
         when {
-            // Пока идёт пауза перед показом, ходов уже нет — кнопка «Го» была бы враньём.
+            // Пока идёт пауза перед показом, ходов уже нет — кнопка GO была бы враньём.
             g.playOver -> button(c, w / 2f - dp(90f), h - dp(106f), dp(180f), dp(48f),
                 "Розыгрыш окончен", false, A_NEXT, -1)
+            // Счёт закрыт и висит на паузе: ходов нет, а GO была бы враньём.
+            g.newCountWaiting -> button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f),
+                "Новый счёт", false, A_NEXT, -1)
+            // Ход пропускается автоматически: показываем это, но кнопку не даём.
+            g.passWaiting -> button(c, w / 2f - dp(70f), h - dp(106f), dp(140f), dp(48f),
+                "GO", false, A_NEXT, -1)
             g.turn != Seat.PLAYER -> button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f),
                 "Ход компьютера", false, A_NEXT, -1)
             g.playerHasMove() -> button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f),
                 "Нажмите на карту", false, A_NEXT, -1)
             else -> button(c, w / 2f - dp(70f), h - dp(106f), dp(140f), dp(48f),
-                "Го", true, A_GO, -1)
+                "GO", true, A_GO, -1)
         }
     }
 
@@ -612,34 +622,36 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
     /**
      * К crib рубашкой рядом со стартовой картой — как на настоящем столе.
-     * Подписи вынесены наверх: снизу им не поместиться, на невысоких экранах
-     * они наезжали бы на панель объявления.
+     * Ряд привязан к низу: стартовая карта крупная и растёт вверх, на панель объявления
+     * не наезжает. Подписи стоят над рядом — снизу им не поместиться.
      */
-    private fun drawCrib(c: Canvas, g: Game, w: Float, y: Float) {
+    private fun drawCrib(c: Canvas, g: Game, w: Float, bottom: Float) {
         val cw = dp(24f)
         val gap = dp(3f)
-        val sw = dp(28f)
+        val sw = dp(37f)
         val n = g.crib.size
         val cribW = if (n > 0) n * cw + (n - 1) * gap else 0f
         val spacer = if (n > 0) dp(12f) else 0f
         val left = w / 2f - (cribW + spacer + sw) / 2f
+        // Подписи ряда стоят на одной высоте — по верху самой высокой карты, это стартовая.
+        val top = bottom - cardH(sw)
         var x = left
         for (i in 0 until n) {
-            drawCard(c, x, cw, y, null, false, false, false)
+            drawCard(c, x, cw, bottom - cardH(cw), null, false, false, false)
             x += cw + gap
         }
         val sx = left + cribW + spacer
-        g.starter?.let { drawCard(c, sx, sw, y, it, true, false, true) }
+        g.starter?.let { drawCard(c, sx, sw, top, it, true, false, true) }
 
         text.typeface = Typeface.DEFAULT
         text.textSize = dp(10f)
         text.color = pal.dim
         if (n > 0) {
             text.textAlign = Paint.Align.LEFT
-            c.drawText(cribOwner(g), left, y - dp(5f), text)
+            c.drawText(cribOwner(g), left, top - dp(5f), text)
         }
         text.textAlign = Paint.Align.CENTER
-        c.drawText("стартовая", sx + sw / 2f, y - dp(5f), text)
+        c.drawText("стартовая", sx + sw / 2f, top - dp(5f), text)
     }
 
     private fun addCardHit(x: Float, w: Float, top: Float, action: Int, index: Int) {

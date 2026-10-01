@@ -132,6 +132,9 @@ object SaveStore {
             put("pendingGoSeat", if (s.pendingGoSeat == null) JSONObject.NULL else s.pendingGoSeat!!.name)
             put("targetHitBy", if (s.targetHitBy == null) JSONObject.NULL else s.targetHitBy!!.name)
             put("playOver", s.playOver)
+            put("newCountWaiting", s.newCountWaiting)
+            put("passWaiting", s.passWaiting)
+            put("passSeat", if (s.passSeat == null) JSONObject.NULL else s.passSeat!!.name)
         }
     }
 
@@ -141,6 +144,7 @@ object SaveStore {
         val lp = o.opt("lastPlayedBy")
         val pg = o.opt("pendingGoSeat")
         val th = o.opt("targetHitBy")
+        val ps = o.opt("passSeat")
         return Game.restore(
             rules,
             o.optLong("seed"),
@@ -175,7 +179,10 @@ object SaveStore {
                 if (lp == null || lp == JSONObject.NULL) null else Seat.valueOf(lp as String),
                 if (pg == null || pg == JSONObject.NULL) null else Seat.valueOf(pg as String),
                 if (th == null || th == JSONObject.NULL) null else Seat.valueOf(th as String),
-                o.optBoolean("playOver")
+                o.optBoolean("playOver"),
+                o.optBoolean("newCountWaiting"),
+                o.optBoolean("passWaiting"),
+                if (ps == null || ps == JSONObject.NULL) null else Seat.valueOf(ps as String)
             )
         )
     }

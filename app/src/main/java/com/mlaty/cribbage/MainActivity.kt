@@ -85,12 +85,16 @@ class MainActivity : Activity(), GameView.Host {
         if (g != null && needsAi(g)) handler.postDelayed(aiLoop, 500L)
         // Партия могла сохраниться посреди паузы перед показом — паузу надо досчитать заново.
         scheduleShow()
+        scheduleCount()
+        schedulePass()
     }
 
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(aiLoop)
         handler.removeCallbacks(showDelay)
+        handler.removeCallbacks(countDelay)
+        handler.removeCallbacks(passDelay)
         // В меню активной партии нет, но сохранённая ещё должна пережить уход из приложения.
         SaveStore.save(this, rules, live(game ?: savedGame))
     }
@@ -130,7 +134,48 @@ class MainActivity : Activity(), GameView.Host {
 
     private fun needsAi(g: Game) =
         (g.phase == Phase.DISCARD && g.aiDiscardsLeft > 0) ||
-            (g.phase == Phase.PLAY && g.turn == Seat.AI && !g.playOver)
+            (g.phase == Phase.PLAY && g.turn == Seat.AI && !g.playOver &&
+                !g.newCountWaiting && !g.passWaiting)
+
+    /**
+     * Пауза перед автоматическим «го». Своя, а не showPauseMs: та настройка отвечает
+     * за подсчёт, а тут нужно, чтобы игрок успел увидеть последнюю карту компьютера
+     * и очки за неё. Заодно это пауза в конце розыгрыша, когда у игрока карт
+     * не осталось, а ходит компьютер.
+     */
+    private fun schedulePass() {
+        handler.removeCallbacks(passDelay)
+        val g = game ?: return
+        if (g.phase != Phase.PLAY || !g.passWaiting) return
+        handler.postDelayed(passDelay, PASS_PAUSE_MS)
+    }
+
+    private val passDelay = Runnable {
+        val g = game ?: return@Runnable
+        g.enterPass()
+        refresh()
+        if (needsAi(g)) handler.postDelayed(aiLoop, 650L)
+    }
+
+    /**
+     * Пауза, когда счёт закрыт, а партия продолжается: стек карт и сам счёт висят
+     * на экране, чтобы было видно, какой картой компьютер закрыл розыгрыш. Длительность
+     * та же, что и перед показом, и не короче полёта карты — иначе стек убрался бы,
+     * пока последняя карта ещё летит.
+     */
+    private fun scheduleCount() {
+        handler.removeCallbacks(countDelay)
+        val g = game ?: return
+        if (g.phase != Phase.PLAY || !g.newCountWaiting) return
+        handler.postDelayed(countDelay, maxOf(rules.showPauseMs, rules.flyMs).toLong())
+    }
+
+    private val countDelay = Runnable {
+        val g = game ?: return@Runnable
+        g.enterNextCount()
+        refresh()
+        if (needsAi(g)) handler.postDelayed(aiLoop, 650L)
+    }
 
     /**
      * Пауза между последней картой розыгрыша и показом рук. Длительность берётся из
@@ -193,6 +238,8 @@ class MainActivity : Activity(), GameView.Host {
 
     override fun onNewGame() {
         handler.removeCallbacks(showDelay)
+        handler.removeCallbacks(countDelay)
+        handler.removeCallbacks(passDelay)
         startGame(Game(rules, System.nanoTime()))
     }
 
@@ -214,11 +261,15 @@ class MainActivity : Activity(), GameView.Host {
         board.invalidate()
         SaveStore.save(this, rules, live(g))
         scheduleShow()
+        scheduleCount()
+        schedulePass()
     }
 
     private fun showMenu() {
         handler.removeCallbacks(aiLoop)
         handler.removeCallbacks(showDelay)
+        handler.removeCallbacks(countDelay)
+        handler.removeCallbacks(passDelay)
         // Текущая партия и есть та, которую предложит «Продолжить»: нельзя
         // подменять её старой сохранённой и затирать свежий прогресс.
         val keep = live(game ?: savedGame)
@@ -432,6 +483,7 @@ class MainActivity : Activity(), GameView.Host {
         // из Java-поля const val принимает не всегда, а -1 и -2 — это ровно они.
         private const val MATCH = -1
         private const val WRAP = -2
+        private const val PASS_PAUSE_MS = 800L
 
         private val HELP = """
 Цель — набрать 121 очко раньше компьютера.
