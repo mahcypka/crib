@@ -192,26 +192,32 @@ object Scoring {
 
     /**
      * Серия во время розыгрыша. Считаются карты, сыгранные с последнего сброса счёта;
-     * порядок их хода значения не имеет, серия считается по номиналам. Серия и пара
-     * на одной карте не засчитываются одновременно: нашлась серия — пара не считается.
+     * порядок их хода значения не имеет, серия считается по номиналам. Блок
+     * подряд идущих номиналов ищется вокруг последней сыгранной карты: серия должна
+     * закрываться ею. Серия и пара на одной карте не засчитываются одновременно:
+     * нашлась серия — пара не считается.
      */
     fun pegRun(cardsSinceReset: List<Card>): Int {
-        // Серия всегда заканчивается последней сыгранной картой. Берём последние
-        // три карты, сортируем по возрастанию; если соседние номиналы идут подряд —
-        // это серия длиной 3. Пробуем так же 4, 5 и дальше, пока серия получается
-        // и хватает карт. Порядок хода не важен: 6-7-5 это та же серия, что 5-6-7.
         val n = cardsSinceReset.size
-        var len = 0
-        for (k in 3..n) {
-            val ranks = cardsSinceReset.subList(n - k, n).map { it.rank }.sorted()
-            var consecutive = true
-            for (i in 1 until ranks.size) {
-                if (ranks[i] != ranks[i - 1] + 1) { consecutive = false; break }
-            }
-            if (!consecutive) break
-            len = k
-        }
-        return len
+        if (n < 3) return 0
+        val counts = LinkedHashMap<Int, Int>()
+        for (c in cardsSinceReset) counts[c.rank] = (counts[c.rank] ?: 0) + 1
+        val ranks = counts.keys.sorted()
+        // Серия закрывается той картой, которая сыграна последней, поэтому берётся
+        // именно тот блок подряд идущих номиналов, в который она входит. Смотреть
+        // на все блоки нельзя: серия с другого конца стола этим ходом не закрыта.
+        val i = ranks.indexOf(cardsSinceReset[n - 1].rank)
+        var lo = i
+        while (lo > 0 && ranks[lo - 1] == ranks[lo] - 1) lo--
+        var hi = i
+        while (hi + 1 < ranks.size && ranks[hi + 1] == ranks[hi] + 1) hi++
+        val length = hi - lo + 1
+        if (length < 3) return 0
+        // Повтор номинала внутри блока удваивает число серий: 2-2-3-4-5 это две
+        // серии по 4 очка, а не одна на 4.
+        var ways = 1
+        for (k in lo..hi) ways *= counts[ranks[k]]!!
+        return length * ways
     }
 
     /**
