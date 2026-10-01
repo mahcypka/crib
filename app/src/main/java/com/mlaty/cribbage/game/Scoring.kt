@@ -200,9 +200,7 @@ object Scoring {
     fun pegRun(cardsSinceReset: List<Card>): Int {
         val n = cardsSinceReset.size
         if (n < 3) return 0
-        val counts = LinkedHashMap<Int, Int>()
-        for (c in cardsSinceReset) counts[c.rank] = (counts[c.rank] ?: 0) + 1
-        val ranks = counts.keys.sorted()
+        val ranks = cardsSinceReset.map { it.rank }.distinct().sorted()
         // Серия закрывается той картой, которая сыграна последней, поэтому берётся
         // именно тот блок подряд идущих номиналов, в который она входит. Смотреть
         // на все блоки нельзя: серия с другого конца стола этим ходом не закрыта.
@@ -212,12 +210,10 @@ object Scoring {
         var hi = i
         while (hi + 1 < ranks.size && ranks[hi + 1] == ranks[hi] + 1) hi++
         val length = hi - lo + 1
-        if (length < 3) return 0
-        // Повтор номинала внутри блока удваивает число серий: 2-2-3-4-5 это две
-        // серии по 4 очка, а не одна на 4.
-        var ways = 1
-        for (k in lo..hi) ways *= counts[ranks[k]]!!
-        return length * ways
+        // Одна серия за ход, сколько бы ни было карт одного номинала: серия закрыта
+        // ровно одной сыгранной картой, и 2-2-3-4 это та же серия из трёх, что 2-3-4.
+        // Длина здесь — число РАЗНЫХ номиналов в блоке, а не число карт.
+        return if (length < 3) 0 else length
     }
 
     /**
