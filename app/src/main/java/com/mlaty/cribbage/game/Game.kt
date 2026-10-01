@@ -150,7 +150,8 @@ class Game(val rules: Rules, val seed: Long) {
         val i = deck.indexOfFirst { it.id == cardId }
         if (i < 0) return
         val p = deck.removeAt(i)
-        val a = deck.removeAt(deck.random(rnd()))
+        // Именно индекс: List.random() возвращает элемент, а removeAt ждёт номер.
+        val a = deck.removeAt(deck.indices.random(rnd()))
         dealPick = p
         dealRival = a
         // При равных номиналах к crib остаётся у игрока: перетягивать карту у него
