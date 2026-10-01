@@ -230,28 +230,35 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.color = pal.dim
         c.drawText(
             if (picked) "Меньший номинал получает первый к crib"
-            else "У кого номинал ниже, тот сдаёт и получает первый к crib",
+            else "Рубашкой вверх: никто не видит, где какая карта",
             w / 2f, dp(TOP_BAR) + dp(56f), text
         )
+        if (!picked) {
+            text.color = Theme.GOLD
+            c.drawText("Кто вытянет меньше — тот сдаёт и получает первый к crib",
+                w / 2f, dp(TOP_BAR) + dp(76f), text)
+        }
         if (picked) drawDealt(c, g, w, pad) else drawDeck(c, g, w, pad)
     }
 
     /**
-     * Колода разложена по мастям, четырьмя рядами по тринадцать карт. В один ряд
-     * на таком экране поместилось бы пять карт по шесть с половиной dp шириной —
-     * тапнуть в нужную было бы невозможно, а весь розыгрыш держится на одном тапе.
+     * Колода разложена рубашкой вверх, в том порядке, в каком она перетасована.
+     * Порядок не разбирается и игроком, и компьютером: выбрать себе маленькую
+     * карту нельзя, ровно как и подглядеть, где какая. Четыре ряда по тринадцать
+     * — в один ряд на таком экране поместилось бы по 4.6 dp на карту, тапать было бы
+     * нечем, а весь розыгрыш держится на одном тапе.
      */
     private fun drawDeck(c: Canvas, g: Game, w: Float, pad: Float) {
-        val cards = g.deck.sortedWith(compareBy({ it.suit }, { it.rank }))
+        val cards = g.deck
         val gap = dp(1.5f)
         val rowGap = dp(6f)
         val cellW = (w - pad * 2 - gap * 12) / 13f
         val ch = cardH(cellW)
-        val top = dp(TOP_BAR) + dp(84f)
+        val top = dp(TOP_BAR) + dp(92f)
         for (i in cards.indices) {
             val x = pad + (i % 13) * (cellW + gap)
             val y = top + (i / 13) * (ch + rowGap)
-            drawCard(c, x, cellW, y, cards[i], true, false, true)
+            drawCard(c, x, cellW, y, null, false, false, false)
             hits.add(Hit(RectF(x, y, x + cellW, y + ch), A_DEAL, cards[i].id))
         }
     }
