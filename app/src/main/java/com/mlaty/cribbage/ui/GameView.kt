@@ -34,6 +34,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         fun onSayGo()
         fun onShowNext()
         fun onOpenMenu()
+        fun onNewGame()
     }
 
     private val d = resources.displayMetrics.density
@@ -57,6 +58,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
         const val A_NEXT = 4
         const val A_CONFIRM = 5
         const val A_MENU = 6
+        const val A_NEWGAME = 7
         const val TOP_BAR = 54f
         const val PEG_FADE = 1400f
     }
@@ -322,6 +324,9 @@ class GameView(context: Context, private val host: Host) : View(context) {
         }
 
         when {
+            // Пока идёт пауза перед показом, ходов уже нет — кнопка «Го» была бы враньём.
+            g.playOver -> button(c, w / 2f - dp(90f), h - dp(106f), dp(180f), dp(48f),
+                "Розыгрыш окончен", false, A_NEXT, -1)
             g.turn != Seat.PLAYER -> button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f),
                 "Ход компьютера", false, A_NEXT, -1)
             g.playerHasMove() -> button(c, w / 2f - dp(80f), h - dp(106f), dp(160f), dp(48f),
@@ -538,7 +543,12 @@ class GameView(context: Context, private val host: Host) : View(context) {
         text.textSize = dp(15f)
         text.color = pal.dim
         c.drawText("Вы ${g.playerScore} : ${g.aiScore} компьютер", w / 2f, h * 0.36f + dp(30f), text)
-        button(c, w / 2f - dp(80f), h * 0.36f + dp(58f), dp(160f), dp(48f), "В меню", true, A_MENU, -1)
+        // Две кнопки в ряд: экран узкий, 336 dp, поэтому ширина считается от него.
+        val gap = dp(12f)
+        val bw = (w - dp(20f) * 2 - gap) / 2f
+        val by = h * 0.36f + dp(58f)
+        button(c, w / 2f - bw - gap / 2f, by, bw, dp(48f), "В меню", true, A_MENU, -1)
+        button(c, w / 2f + gap / 2f, by, bw, dp(48f), "Новая партия", true, A_NEWGAME, -1)
     }
 
     // ---------------------------------------------------------------- общие элементы
@@ -598,7 +608,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
 
     /** К crib достаётся сдающему, а сдающий меняется каждый раунд. */
     private fun cribOwner(g: Game): String =
-        if (g.aiIsDealer) "к crib компьютера" else "ваш к crib"
+        if (g.aiIsDealer) "криб компьютера" else "криб ваш"
 
     /**
      * К crib рубашкой рядом со стартовой картой — как на настоящем столе.
@@ -781,6 +791,7 @@ class GameView(context: Context, private val host: Host) : View(context) {
                 A_NEXT -> host.onShowNext()
                 A_CONFIRM -> host.onConfirmDiscard(selection())
                 A_MENU -> host.onOpenMenu()
+                A_NEWGAME -> host.onNewGame()
             }
             return true
         }

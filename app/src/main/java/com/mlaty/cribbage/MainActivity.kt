@@ -20,6 +20,7 @@ import com.mlaty.cribbage.game.Seat
 import com.mlaty.cribbage.model.BackStyle
 import com.mlaty.cribbage.model.Difficulty
 import com.mlaty.cribbage.model.FlySpeed
+import com.mlaty.cribbage.model.ShowPause
 import com.mlaty.cribbage.model.Rules
 import com.mlaty.cribbage.model.TableStyle
 import com.mlaty.cribbage.model.WinMode
@@ -82,11 +83,14 @@ class MainActivity : Activity(), GameView.Host {
         // onPause снимает очередь ходов компьютера — без этого партия встала бы после возврата.
         val g = game
         if (g != null && needsAi(g)) handler.postDelayed(aiLoop, 500L)
+        // Партия могла сохраниться посреди паузы перед показом — паузу надо досчитать заново.
+        scheduleShow()
     }
 
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(aiLoop)
+        handler.removeCallbacks(showDelay)
         // В меню активной партии нет, но сохранённая ещё должна пережить уход из приложения.
         SaveStore.save(this, rules, live(game ?: savedGame))
     }
@@ -126,7 +130,25 @@ class MainActivity : Activity(), GameView.Host {
 
     private fun needsAi(g: Game) =
         (g.phase == Phase.DISCARD && g.aiDiscardsLeft > 0) ||
-            (g.phase == Phase.PLAY && g.turn == Seat.AI)
+            (g.phase == Phase.PLAY && g.turn == Seat.AI && !g.playOver)
+
+    /**
+     * Пауза между последней картой розыгрыша и показом рук. Длительность берётся из
+     * настроек, но не короче полёта карты — иначе последняя карта улетела бы на
+     * экране подсчёта, и толку от паузы не было бы.
+     */
+    private fun scheduleShow() {
+        handler.removeCallbacks(showDelay)
+        val g = game ?: return
+        if (!g.playOver) return
+        handler.postDelayed(showDelay, maxOf(rules.showPauseMs, rules.flyMs).toLong())
+    }
+
+    private val showDelay = Runnable {
+        val g = game ?: return@Runnable
+        g.enterShow()
+        refresh()
+    }
 
     private fun afterPlayerMove() {
         val g = game ?: return
@@ -169,6 +191,11 @@ class MainActivity : Activity(), GameView.Host {
 
     override fun onOpenMenu() = showMenu()
 
+    override fun onNewGame() {
+        handler.removeCallbacks(showDelay)
+        startGame(Game(rules, System.nanoTime()))
+    }
+
     // ---------------------------------------------------------------- экраны
 
     private fun startGame(g: Game) {
@@ -186,10 +213,12 @@ class MainActivity : Activity(), GameView.Host {
         board.look = rules
         board.invalidate()
         SaveStore.save(this, rules, live(g))
+        scheduleShow()
     }
 
     private fun showMenu() {
         handler.removeCallbacks(aiLoop)
+        handler.removeCallbacks(showDelay)
         // Текущая партия и есть та, которую предложит «Продолжить»: нельзя
         // подменять её старой сохранённой и затирать свежий прогресс.
         val keep = live(game ?: savedGame)
@@ -224,7 +253,7 @@ class MainActivity : Activity(), GameView.Host {
         col.addView(label(rules.difficulty.hint, 12f, pal.dim))
 
         col.addView(space(20))
-        col.addView(label("Оформление стола", 14f, Theme.GOLD, true))
+        col.addView(label("Анимация и оформление", 14f, Theme.GOLD, true))
         col.addView(space(8))
         col.addView(label("Время полёта карты", 12f, Theme.TEXT))
         col.addView(chips(FlySpeed.choices.map { FlySpeed.title(it) },
@@ -236,6 +265,19 @@ class MainActivity : Activity(), GameView.Host {
         col.addView(label(
             if (rules.flyMs == FlySpeed.NONE) "Карта кладётся сразу, ход не ждёт анимации"
             else "Пока карта летит, ход ждёт — иначе компьютер ходил бы поверх",
+            12f, pal.dim))
+        col.addView(space(12))
+        col.addView(label("Пауза перед подсчётом", 12f, Theme.TEXT))
+        col.addView(chips(ShowPause.choices.map { ShowPause.title(it) },
+            ShowPause.choices.indexOf(rules.showPauseMs).let { if (it < 0) 2 else it }, 12f) { i ->
+            rules = rules.copy(showPauseMs = ShowPause.choices[i])
+            showMenu()
+        })
+        col.addView(space(6))
+        col.addView(label(
+            if (rules.showPauseMs == ShowPause.NONE && rules.flyMs == FlySpeed.NONE)
+                "Без паузы и без анимации подсчёт начнётся сразу"
+            else "Столько ждём после последней карты, чтобы её успеть увидеть",
             12f, pal.dim))
         col.addView(space(12))
         col.addView(label("Рубашка", 12f, Theme.TEXT))

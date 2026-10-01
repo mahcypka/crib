@@ -7,6 +7,7 @@ import com.mlaty.cribbage.game.Seat
 import com.mlaty.cribbage.model.Card
 import com.mlaty.cribbage.model.FlySpeed
 import com.mlaty.cribbage.model.Rules
+import com.mlaty.cribbage.model.ShowPause
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -72,6 +73,7 @@ object SaveStore {
         put("bonus29", r.bonus29)
         put("difficulty", r.difficulty.name)
         put("flyMs", r.flyMs)
+        put("showPauseMs", r.showPauseMs)
         put("back", r.back.name)
         put("table", r.table.name)
     }
@@ -84,6 +86,7 @@ object SaveStore {
         o.optInt("bonus29", 2),
         o.optString("difficulty"),
         o.optInt("flyMs", FlySpeed.NORMAL),
+        o.optInt("showPauseMs", ShowPause.NORMAL),
         o.optString("back"),
         o.optString("table")
     )

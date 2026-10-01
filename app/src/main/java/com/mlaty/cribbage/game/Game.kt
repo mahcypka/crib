@@ -64,6 +64,14 @@ class Game(val rules: Rules, val seed: Long) {
     var winner = ""; private set
 
     /**
+     * Розыгрыш окончен и карты кончились, но экран показа ещё не открыт: игрок должен
+     * сначала увидеть, чем закончился ход. Длительность паузы задаёт интерфейс — сама
+     * модель про время не знает, иначе она перестала бы восстанавливаться из сохранения.
+     * Пока флаг стоит, ходы больше не принимаются: [enterShow] переводит игру в показ.
+     */
+    var playOver = false; private set
+
+    /**
      * Очки за последний сыгранный ход — для всплывающей отметки. Это чисто
      * украшение розыгрыша, поэтому в сохранение не попадает.
      */
@@ -126,6 +134,7 @@ class Game(val rules: Rules, val seed: Long) {
         pegLabel = ""
         pegSeat = null
         lastPegSeat = null
+        playOver = false
         playerDiscardsLeft = 2
         aiDiscardsLeft = 2
         phase = Phase.DISCARD
@@ -188,13 +197,13 @@ class Game(val rules: Rules, val seed: Long) {
     }
 
     fun playerGo() {
-        if (phase != Phase.PLAY || turn != Seat.PLAYER) return
+        if (phase != Phase.PLAY || playOver || turn != Seat.PLAYER) return
         if (playerLeft.any { playable(it) }) return
         pass(Seat.PLAYER)
     }
 
     fun aiAct(): Boolean {
-        if (phase != Phase.PLAY || turn != Seat.AI) return false
+        if (phase != Phase.PLAY || playOver || turn != Seat.AI) return false
         val i = Ai.choosePlay(aiLeft, sequence, count, rules.difficulty, rnd())
         if (i < 0) {
             if (aiLeft.any { playable(it) }) return false
@@ -279,10 +288,21 @@ class Game(val rules: Rules, val seed: Long) {
         passes = 0
         pendingGoSeat = null
         if (lastPlayedBy != null) turn = if (lastPlayedBy == Seat.PLAYER) Seat.AI else Seat.PLAYER
-        if (playerLeft.isEmpty() && aiLeft.isEmpty()) beginShow()
+        if (playerLeft.isEmpty() && aiLeft.isEmpty()) playOver = true
     }
 
     // ---------------------------------------------------------------- подсчёт очков
+
+    /**
+     * Переход к показу. Отдельный шаг, а не хвост [finishCount], потому что между
+     * последней картой и подсчётом игроку нужна пауза — величину её задаёт интерфейс.
+     * Партия, уже доигравшая до конца (цель набрана), показ не открывает.
+     */
+    fun enterShow() {
+        if (!playOver || phase != Phase.PLAY) return
+        playOver = false
+        beginShow()
+    }
 
     private fun beginShow() {
         phase = Phase.SHOW
@@ -334,6 +354,9 @@ class Game(val rules: Rules, val seed: Long) {
         val hit = targetHitBy ?: return false
         if (rules.winMode != WinMode.SCORE) return false
         phase = Phase.OVER
+        // Партия кончилась на последней карте розыгрыша — показа не будет, и ждать его нельзя,
+        // иначе ожидание показа будет переноситься на уже закрытую партию.
+        playOver = false
         winner = when {
             rules.lowball && hit == Seat.PLAYER ->
                 "Первым ${rules.target} очков набрали вы — по лоуболлу вы проиграли"
@@ -419,7 +442,8 @@ class Game(val rules: Rules, val seed: Long) {
         val passes: Int,
         val lastPlayedBy: Seat?,
         val pendingGoSeat: Seat?,
-        val targetHitBy: Seat?
+        val targetHitBy: Seat?,
+        val playOver: Boolean
     )
 
     fun snapshot(): State = State(
@@ -431,7 +455,7 @@ class Game(val rules: Rules, val seed: Long) {
         sequence.toList(), count, turn, announce, showIndex,
         roundPlayerPoints, roundAiPoints,
         lastShowBonus, winner,
-        passes, lastPlayedBy, pendingGoSeat, targetHitBy
+        passes, lastPlayedBy, pendingGoSeat, targetHitBy, playOver
     )
 
     companion object {
@@ -467,6 +491,7 @@ class Game(val rules: Rules, val seed: Long) {
             g.lastPlayedBy = s.lastPlayedBy
             g.pendingGoSeat = s.pendingGoSeat
             g.targetHitBy = s.targetHitBy
+            g.playOver = s.playOver
             return g
         }
     }

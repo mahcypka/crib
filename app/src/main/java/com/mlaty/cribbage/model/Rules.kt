@@ -39,6 +39,27 @@ object FlySpeed {
     }
 }
 
+/**
+ * Пауза перед показом рук: сколько ждать после последней карты розыгрыша.
+ * 0 — переходить к подсчёту сразу. Действует только на паузу, но не меньше
+ * времени полёта карты, иначе последняя карта улетела бы прямо на экране показа.
+ */
+object ShowPause {
+    const val NONE = 0
+    const val SHORT = 500
+    const val NORMAL = 1000
+    const val LONG = 1500
+    const val LONGEST = 2000
+    val choices = listOf(NONE, SHORT, NORMAL, LONG, LONGEST)
+    fun title(ms: Int): String = when (ms) {
+        NONE -> "нет"
+        SHORT -> "0,5"
+        NORMAL -> "1,0"
+        LONG -> "1,5"
+        else -> "2,0"
+    }
+}
+
 data class Rules(
     val winMode: WinMode = WinMode.SCORE,
     val target: Int = 121,
@@ -47,6 +68,7 @@ data class Rules(
     val bonus29: Int = 2,
     val difficulty: Difficulty = Difficulty.NORMAL,
     val flyMs: Int = FlySpeed.NORMAL,
+    val showPauseMs: Int = ShowPause.NORMAL,
     val back: BackStyle = BackStyle.PLAIN,
     val table: TableStyle = TableStyle.GREEN
 ) {
@@ -62,7 +84,8 @@ data class Rules(
 
     companion object {
         fun decode(mode: String?, target: Int, lowball: Boolean, zeroPenalty: Boolean,
-                   bonus29: Int, diff: String?, flyMs: Int, back: String?, table: String?): Rules = Rules(
+                   bonus29: Int, diff: String?, flyMs: Int, showPauseMs: Int,
+                   back: String?, table: String?): Rules = Rules(
             if (mode == "ROUNDS") WinMode.ROUNDS else WinMode.SCORE,
             target, lowball, zeroPenalty, bonus29,
             when (diff) {
@@ -71,6 +94,7 @@ data class Rules(
                 else -> Difficulty.NORMAL
             },
             if (flyMs in FlySpeed.choices) flyMs else FlySpeed.NORMAL,
+            if (showPauseMs in ShowPause.choices) showPauseMs else ShowPause.NORMAL,
             pick(BackStyle.values(), back, BackStyle.PLAIN),
             pick(TableStyle.values(), table, TableStyle.GREEN)
         )
