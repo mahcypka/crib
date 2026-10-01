@@ -351,9 +351,12 @@ class Game(val rules: Rules, val seed: Long) {
         val parts = ArrayList<String>(3)
         var pts = 0
         if (count == 15) { pts += 2; parts += "15 — 2" }
-        // Серия и пара на одной карте вместе не засчитываются: нашлась серия — пара не считается.
+        // Всё проверяется каждый раз и никого не гасит: одна карта может закрыть серию
+        // и одновременно образовать пару, а счёт может встать на 15 — это три
+        // независимых условия, и все три выполняются. 31 разбирается отдельно,
+        // в finishCount, и тоже ничего не отменяет.
+        val pair = Scoring.pegPair(sequence)
         val run = Scoring.pegRun(sequence)
-        val pair = if (run > 0) 0 else Scoring.pegPair(sequence)
         if (run > 0) { pts += run; parts += "серия $run — $run" }
         if (pair > 0) {
             pts += pair
